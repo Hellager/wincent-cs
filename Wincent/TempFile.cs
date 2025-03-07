@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 
 namespace Wincent
@@ -20,6 +21,11 @@ namespace Wincent
         /// Gets the filename (including extension)
         /// </summary>
         public string FileName => Path.GetFileName(FullPath);
+
+        /// <summary>
+        /// Gets the directory name where temporary files are created
+        /// </summary>
+        public static string DirName { get; set; } = "WincentTemp";
 
         private bool _disposed;
 
@@ -87,7 +93,22 @@ namespace Wincent
 
         private static string GenerateFilePath(string extension)
         {
-            string tempDir = Path.GetTempPath();
+            string baseTempDir = Path.GetTempPath();
+            string tempDir = Path.Combine(baseTempDir, DirName);
+
+            if (!Directory.Exists(tempDir))
+            {
+                try
+                {
+                    Directory.CreateDirectory(tempDir);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to create temp directory: {ex.Message}");
+                    tempDir = baseTempDir;
+                }
+            }
+
             string fileName = $"{Guid.NewGuid():N}{extension}";
             return Path.Combine(tempDir, fileName);
         }
