@@ -1,5 +1,6 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Text;
 using Wincent;
 
 namespace TestWincent
@@ -168,6 +169,45 @@ namespace TestWincent
             var script = strategy.GenerateScript(longPath);
 
             StringAssert.Contains(script, longPath);
+        }
+
+        [TestMethod]
+        public void PathWithDots_HandlesCorrectly()
+        {
+            // Arrange
+            var strategy = new UnpinFromFrequentFolderStrategy();
+            var path = @"C:\folder.name\file..txt";
+
+            // Act
+            var script = strategy.GenerateScript(path);
+
+            // Assert
+            StringAssert.Contains(script, path);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void EmptyPath_ThrowsArgumentException()
+        {
+            // Arrange
+            var strategy = new PinToFrequentFolderStrategy();
+
+            // Act
+            strategy.GenerateScript(string.Empty);
+        }
+
+        [TestMethod]
+        public void PathWithValidSpecialCharacters_HandlesCorrectly()
+        {
+            // Arrange
+            var strategy = new RemoveRecentFileStrategy();
+            var path = @"C:\folder-name\file (1)_[test]~$temp.txt";
+
+            // Act
+            var script = strategy.GenerateScript(path);
+
+            // Assert
+            StringAssert.Contains(script, path);
         }
     }
 }
