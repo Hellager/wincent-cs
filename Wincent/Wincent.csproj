@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Management.Automation" Version="7.4.7" />
+  </ItemGroup>
+
 </Project>
