@@ -209,5 +209,69 @@ namespace TestWincent
             // Assert
             StringAssert.Contains(script, path);
         }
+
+        [TestMethod]
+        public void GenerateAndSaveStrategyScripts()
+        {
+            var saveDir = Path.Combine(
+                Path.GetTempPath(),
+                "WincentTemp",
+                "Scripts");
+
+            if (Directory.Exists(saveDir))
+            {
+                Directory.Delete(saveDir, true);
+            }
+            Directory.CreateDirectory(saveDir);
+
+            var testParams = new Dictionary<PSScript, string?>
+            {
+                [PSScript.RefreshExplorer] = null,
+                [PSScript.QueryQuickAccess] = null,
+                [PSScript.QueryRecentFile] = null,
+                [PSScript.QueryFrequentFolder] = null,
+                [PSScript.RemoveRecentFile] = @"C:\Users\hp\AppData\Local\Temp\WincentTemp",
+                [PSScript.PinToFrequentFolder] = @"C:\Users\hp\AppData\Local\Temp\WincentTemp",
+                [PSScript.UnpinFromFrequentFolder] = @"C:\Users\hp\AppData\Local\Temp\WincentTemp",
+                [PSScript.CheckQueryFeasible] = null,
+                [PSScript.CheckPinUnpinFeasible] = null
+            };
+
+            try
+            {
+                foreach (var (scriptType, param) in testParams)
+                {
+                    var strategy = _factory.GetStrategy(scriptType);
+                    var scriptContent = strategy.GenerateScript(param);
+
+                    byte[] scriptBytes = Encoding.UTF8.GetBytes(scriptContent);
+                    byte[] contentWithBom = ScriptExecutor.AddUtf8Bom(scriptBytes);
+
+                    using var tempFile = TempFile.Create(contentWithBom, "ps1");
+                    Assert.IsTrue(File.Exists(tempFile.FullPath), $"Temporary file not created: {scriptType}");
+
+                    var permanentPath = Path.Combine(saveDir, $"{scriptType}.ps1");
+                    File.Copy(tempFile.FullPath, permanentPath, true);
+                    Assert.IsTrue(File.Exists(permanentPath), $"Permanent file not created: {scriptType}");
+
+                    var savedContent = File.ReadAllText(permanentPath);
+                    Assert.AreEqual(scriptContent, savedContent, $"File content does not match: {scriptType}");
+
+                    var fileBytes = File.ReadAllBytes(permanentPath);
+                    var hasBom = fileBytes.Length >= 3 &&
+                                 fileBytes[0] == 0xEF &&
+                                 fileBytes[1] == 0xBB &&
+                                 fileBytes[2] == 0xBF;
+                    Assert.IsTrue(hasBom, $"File should use UTF8-BOM encoding: {scriptType}");
+                }
+
+                Console.WriteLine($"Script files saved to: {saveDir}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error occurred during test: {ex.Message}");
+                throw;
+            }
+        }
     }
 }
