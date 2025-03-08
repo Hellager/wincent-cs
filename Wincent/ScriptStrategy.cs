@@ -31,34 +31,11 @@ namespace Wincent
     ";
 
         public abstract string GenerateScript(string? parameter);
-
-        protected static string WithTimeoutHandler(string scriptBody, int timeoutSeconds = 5)
-        {
-            return $@"
-            $scriptBlock = {{
-                {scriptBody}
-            }}
-            
-            $arguments = ""-Command & $scriptBlock""
-            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
-            
-            if (-not $process.WaitForExit({timeoutSeconds} * 1000)) {{
-                try {{
-                    $process.Kill()
-                    Write-Error ""Operation timeout ({timeoutSeconds} seconds)""
-                    exit 1
-                }} catch {{
-                    Write-Error ""Failed to terminate process: $_""
-                    exit 1
-                }}
-            }}
-        ";
-        }
     }
 
     public static class ShellNamespaces
     {
-        public const string RecentFiles = "shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}";
+        public const string QuickAccess = "shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}";
         public const string FrequentFolders = "shell:::{3936E9E4-D92C-4EEE-A85A-BC16D5EA0819}";
     }
 
@@ -77,7 +54,7 @@ namespace Wincent
         public override string GenerateScript(string? parameter) => $@"
             {EncodingSetup}
             $shell = New-Object -ComObject Shell.Application;
-            $shell.Namespace('{ShellNamespaces.RecentFiles}').Items() | 
+            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
                 where {{ $_.IsFolder -eq $false }} | 
                 ForEach-Object {{ $_.Path }}
         ";
@@ -98,40 +75,30 @@ namespace Wincent
         public override string GenerateScript(string? parameter) => $@"
             {EncodingSetup}
             $shell = New-Object -ComObject Shell.Application;
-            $shell.Namespace('{ShellNamespaces.RecentFiles}').Items() | 
+            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
                 ForEach-Object {{ $_.Path }}
         ";
     }
 
     public class CheckQueryFeasibleStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter)
-        {
-            const string coreScript = @"
-                $shell = New-Object -ComObject Shell.Application
-                $shell.Namespace('shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}').Items() | 
-                    ForEach-Object { $_.Path }
-            ";
-
-            return WithTimeoutHandler(coreScript, timeoutSeconds: 5);
-        }
+        public override string GenerateScript(string? parameter) => $@"
+            $shell = New-Object -ComObject Shell.Application
+            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
+                ForEach-Object {{ $_.Path }}
+        ";
     }
 
     public class CheckPinUnpinFeasibleStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter)
-        {
-            const string coreScript = @"
-                $shell = New-Object -ComObject Shell.Application
-                $shell.Namespace($scriptPath).Self.InvokeVerb('pintohome')
+        public override string GenerateScript(string? parameter) => $@"
+            $shell = New-Object -ComObject Shell.Application
+            $shell.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
 
-                $folders = $shell.Namespace('shell:::{3936E9E4-D92C-4EEE-A85A-BC16D5EA0819}').Items();
-                $target = $folders | Where-Object {$_.Path -match ${$scriptPath}};
-                $target.InvokeVerb('unpinfromhome');
-            ";
-
-            return WithTimeoutHandler(coreScript, timeoutSeconds: 5);
-        }
+            $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+            $target = $folders | where {{ $_.Path -eq $PSScriptRoot }};
+            $target.InvokeVerb('unpinfromhome');
+        ";
     }
 
     public class RemoveRecentFileStrategy : PSScriptStrategyBase
@@ -144,7 +111,7 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 $shell = New-Object -ComObject Shell.Application;
-                $files = $shell.Namespace('{ShellNamespaces.RecentFiles}').Items() | 
+                $files = $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
                          where {{ $_.IsFolder -eq $false }};
                 $target = $files | where {{ $_.Path -eq '{parameter}' }};
                 $target.InvokeVerb('remove');
@@ -177,8 +144,7 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 $shell = New-Object -ComObject Shell.Application;
-                $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items() | 
-                         where {{ $_.IsFolder -eq $false }};
+                $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
                 $target = $folders | where {{ $_.Path -eq '{parameter}' }};
                 $target.InvokeVerb('unpinfromhome');
             ";
