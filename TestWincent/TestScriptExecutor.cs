@@ -120,9 +120,9 @@ namespace TestWincent
         public async Task TestNullScript()
         {
             var executor = new ScriptExecutor();
-            string script = null;
+            string? script = null;
 
-            await executor.ExecutePowerShellScriptAsync(script);
+            await executor.ExecutePowerShellScriptAsync(script!);
         }
 
         [TestMethod]

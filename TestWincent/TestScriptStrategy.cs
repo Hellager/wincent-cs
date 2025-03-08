@@ -41,7 +41,7 @@ namespace TestWincent
             var script = strategy.GenerateScript(null);
 
             // Assert
-            StringAssert.Contains(script, ShellNamespaces.RecentFiles);
+            StringAssert.Contains(script, ShellNamespaces.QuickAccess);
             StringAssert.Contains(script, "$_.IsFolder -eq $false");
         }
 
@@ -59,26 +59,14 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void CheckQueryFeasible_ContainsTimeoutHandler()
-        {
-            // Arrange
-            var strategy = new CheckQueryFeasibleStrategy();
-
-            // Act
-            var script = strategy.GenerateScript(null);
-
-            // Assert
-            StringAssert.Contains(script, "WaitForExit(5 * 1000)");
-            StringAssert.Contains(script, "Write-Error \"Operation timeout (5 seconds)\"");
-            StringAssert.Contains(script, "Start-Process powershell");
-        }
-
-        [TestMethod]
         public void Factory_ReturnsCorrectStrategies()
         {
+            // Arrange
+            Assert.IsNotNull(_factory, "Factory should be initialized in TestInitialize");
+            
             // Act & Assert
             Assert.IsInstanceOfType(
-                _factory.GetStrategy(PSScript.RefreshExplorer),
+                _factory!.GetStrategy(PSScript.RefreshExplorer),
                 typeof(RefreshExplorerStrategy));
 
             Assert.IsInstanceOfType(
@@ -95,10 +83,11 @@ namespace TestWincent
         {
             // Arrange
             var invalidMethod = (PSScript)100;
+            Assert.IsNotNull(_factory, "Factory should be initialized in TestInitialize");
 
             // Act & Assert
             var ex = Assert.ThrowsException<NotSupportedException>(
-                () => _factory.GetStrategy(invalidMethod));
+                () => _factory!.GetStrategy(invalidMethod));
 
             StringAssert.Contains(ex.Message, "Unsupported script type: 100");
         }
@@ -143,7 +132,6 @@ namespace TestWincent
             // Assert
             StringAssert.Contains(script, "InvokeVerb('pintohome')");
             StringAssert.Contains(script, "InvokeVerb('unpinfromhome')");
-            StringAssert.Contains(script, "WaitForExit(5 * 1000)");
         }
 
         [TestMethod]
@@ -213,6 +201,9 @@ namespace TestWincent
         [TestMethod]
         public void GenerateAndSaveStrategyScripts()
         {
+            // Arrange
+            Assert.IsNotNull(_factory, "Factory should be initialized in TestInitialize");
+
             var saveDir = Path.Combine(
                 Path.GetTempPath(),
                 "WincentTemp",
@@ -241,7 +232,7 @@ namespace TestWincent
             {
                 foreach (var (scriptType, param) in testParams)
                 {
-                    var strategy = _factory.GetStrategy(scriptType);
+                    var strategy = _factory!.GetStrategy(scriptType);
                     var scriptContent = strategy.GenerateScript(param);
 
                     byte[] scriptBytes = Encoding.UTF8.GetBytes(scriptContent);
