@@ -6,7 +6,7 @@ using Wincent;
 namespace TestWincent
 {
     [TestClass]
-    public class PSScriptStrategyTests
+    public class TestPSScriptStrategyTest
     {
         private DefaultPSScriptStrategyFactory? _factory;
 
