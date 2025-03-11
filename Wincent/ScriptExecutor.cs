@@ -269,7 +269,7 @@ namespace Wincent
             return (Directory.Exists(name) || File.Exists(name));
         }
 
-        public async Task<ScriptResult> ExecutePSScript(PSScript method, string? para)
+        public static async Task<ScriptResult> ExecutePSScript(PSScript method, string? para)
         {
             var executor = new ScriptExecutor();
 

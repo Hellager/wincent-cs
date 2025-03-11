@@ -93,9 +93,7 @@ namespace TestWincent
         [TestMethod]
         public async Task TestPredefinedScripts()
         {
-            var executor = new ScriptExecutor();
-
-            var result = await executor.ExecutePSScript(PSScript.QueryRecentFile, null);
+            var result = await ScriptExecutor.ExecutePSScript(PSScript.QueryRecentFile, null);
 
             Assert.IsNotNull(result, "Result should not be null");
         }
@@ -128,10 +126,7 @@ namespace TestWincent
         [TestMethod]
         public async Task TestCustomStrategyFactory()
         {
-            var mockFactory = new MockPSScriptStrategyFactory();
-            var executor = new ScriptExecutor(mockFactory);
-
-            var result = await executor.ExecutePSScript(PSScript.RefreshExplorer, null);
+            var result = await ScriptExecutor.ExecutePSScript(PSScript.RefreshExplorer, null);
 
             Assert.IsNotNull(result, "Result should not be null");
         }
