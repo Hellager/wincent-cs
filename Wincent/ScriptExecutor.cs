@@ -24,6 +24,16 @@ namespace Wincent
             Output = output;
             Error = error;
         }
+
+        public ScriptExecutionException(
+            string message,
+            string output,
+            string error)
+            : base(message)
+        {
+            Output = output;
+            Error = error;
+        }
     }
 
     public class ScriptTimeoutException : Exception
