@@ -49,6 +49,7 @@
     <Compile Include="QuickAccessManager.cs" />
     <Compile Include="QuickAccessQuery.cs" />
     <Compile Include="ScriptExecutor.cs" />
+    <Compile Include="ScriptStorage.cs" />
     <Compile Include="ScriptStrategy.cs" />
     <Compile Include="TempFile.cs" />
   </ItemGroup>

@@ -122,6 +122,17 @@ namespace Wincent
             _runspacePool.SetMaxRunspaces(5);
             _runspacePool.ThreadOptions = PSThreadOptions.UseNewThread;
             _runspacePool.Open();
+
+            Task.Run(() =>
+            {
+                foreach (PSScript script in Enum.GetValues(typeof(PSScript)))
+                {
+                    if (!ScriptStorage.IsParameterizedScript(script))
+                    {
+                        GetScriptContent(script, string.Empty);
+                    }
+                }
+            });
         }
 
         public class SetExecutionPolicyCommand : PSCmdlet
@@ -141,11 +152,36 @@ namespace Wincent
         public string GetScriptContent(PSScript method, string parameter)
         {
             if (!Enum.IsDefined(typeof(PSScript), method))
-                throw new ArgumentOutOfRangeException(nameof(method), "Invalid script type");
+                throw new ArgumentOutOfRangeException(nameof(method));
 
+            if (ScriptStorage.IsParameterizedScript(method))
+            {
+                return GenerateAndCacheParameterizedScript(method, parameter);
+            }
+
+            var scriptPath = ScriptStorage.GetScriptPath(method);
+
+            lock (_fileLock)
+            {
+                if (!File.Exists(scriptPath))
+                {
+                    var strategy = _strategyFactory.GetStrategy(method);
+                    var content = strategy.GenerateScript(parameter);
+                    File.WriteAllText(scriptPath, content, Encoding.UTF8);
+                }
+
+                return File.ReadAllText(scriptPath, Encoding.UTF8);
+            }
+        }
+
+        private static readonly object _fileLock = new object();
+
+        private string GenerateAndCacheParameterizedScript(PSScript method, string parameter)
+        {
             try
             {
-                return ScriptCache.GetOrAdd(method, key => {
+                return ScriptCache.GetOrAdd(method, key =>
+                {
                     var strategy = _strategyFactory.GetStrategy(key);
                     return strategy.GenerateScript(parameter);
                 });
@@ -155,6 +191,7 @@ namespace Wincent
                 throw new ScriptGenerationException($"Script generation failed: {ex.Message}", ex);
             }
         }
+
 
         public async Task<ScriptResult> ExecutePowerShellScriptAsync(
             string scriptContent,
