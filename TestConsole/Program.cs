@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security;
 using System.Threading.Tasks;
 using Wincent;
 
@@ -11,13 +12,15 @@ namespace TestConsole
         private static readonly Dictionary<int, string> MenuOptions = new Dictionary<int, string>()
         {
             {1, "检查执行策略"},
-            {2, "添加文件到最近访问"},
-            {3, "固定文件夹到常用位置"},
-            {4, "列出最近访问文件"},
-            {5, "列出常用文件夹"},
-            {6, "清空所有快速访问项"},
-            {7, "测试路径保护检测"},
+            {2, "修复执行策略"}, // 新增选项
+            {3, "添加文件到最近访问"},
+            {4, "固定文件夹到常用位置"},
+            {5, "列出最近访问文件"},
+            {6, "列出常用文件夹"},
+            {7, "清空所有快速访问项"},
+            {8, "测试路径保护检测"}, // 原7改为8
             {0, "退出程序"}
+
         };
 
         static async Task Main(string[] args)
@@ -48,22 +51,25 @@ namespace TestConsole
                         case 1:
                             CheckExecutionPolicy();
                             break;
-                        case 2:
-                            await HandleAddFile();
+                        case 2: // 新增case
+                            FixExecutionPolicy();
                             break;
                         case 3:
-                            await HandlePinFolder();
+                            await HandleAddFile();
                             break;
                         case 4:
-                            await ListRecentFiles();
+                            await HandlePinFolder();
                             break;
                         case 5:
-                            await ListFrequentFolders();
+                            await ListRecentFiles();
                             break;
                         case 6:
-                            HandleClearQuickAccess();
+                            await ListFrequentFolders();
                             break;
                         case 7:
+                            HandleClearQuickAccess();
+                            break;
+                        case 8:
                             TestProtectedPaths();
                             break;
                     }
@@ -136,6 +142,38 @@ namespace TestConsole
             Console.WriteLine($"  ▪ 允许执行: {ExecutionFeasible.CheckScriptFeasible().ToYesNo()}");
             Console.WriteLine($"  ▪ 管理员权限: {ExecutionFeasible.IsAdministrator().ToYesNo()}");
         }
+
+        static void FixExecutionPolicy()
+        {
+
+            var confirm = GetUserInput("确定要将执行策略设置为RemoteSigned吗？(y/n)").ToLower();
+            if (confirm != "y") return;
+
+            try
+            {
+                ExecutionFeasible.FixExecutionPolicy();
+
+                // 二次验证
+                var newPolicy = ExecutionFeasible.GetExecutionPolicy();
+                if (newPolicy.Equals("RemoteSigned", StringComparison.OrdinalIgnoreCase))
+                {
+                    ShowSuccess("执行策略已成功设置为RemoteSigned！");
+                }
+                else
+                {
+                    ShowError($"策略设置异常，当前策略：{newPolicy}", pause: true);
+                }
+            }
+            catch (SecurityException ex)
+            {
+                ShowError($"权限不足：{ex.Message}", pause: true);
+            }
+            catch (Exception ex)
+            {
+                ShowError($"策略修改失败：{ex.Message}", pause: true);
+            }
+        }
+
 
         static async Task ListRecentFiles()
         {
