@@ -1,6 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 
 namespace Wincent
 {
@@ -34,25 +38,25 @@ namespace Wincent
         /// </summary>
         /// <param name="content">Binary file content</param>
         /// <param name="extension">File extension (with or without leading dot)</param>
-        public static TempFile Create(byte[]? content, string? extension = ".tmp")
+        public static TempFile Create(byte[] content, string extension = ".tmp", Encoding encoding = null)
         {
-            ArgumentNullException.ThrowIfNull(content);
+            if (encoding == null) encoding = Encoding.UTF8;
+            _ = content ?? throw new ArgumentNullException(nameof(content));
 
-            ValidateExtension(ref extension!);
+            ValidateExtension(ref extension);
 
             string fullPath = GenerateFilePath(extension);
 
             try
             {
                 File.WriteAllBytes(fullPath, content);
+                return new TempFile(fullPath);
             }
             catch
             {
                 SafeDelete(fullPath);
                 throw;
             }
-
-            return new TempFile(fullPath);
         }
 
         /// <summary>
@@ -60,25 +64,24 @@ namespace Wincent
         /// </summary>
         /// <param name="content">File content</param>
         /// <param name="extension">File extension (with or without leading dot)</param>
-        public static TempFile Create(string? content, string? extension = ".tmp")
+        public static TempFile Create(string content, string extension = ".tmp")
         {
-            ArgumentNullException.ThrowIfNull(content);
+            _ = content ?? throw new ArgumentNullException(nameof(content));
 
-            ValidateExtension(ref extension!);
+            ValidateExtension(ref extension);
 
             string fullPath = GenerateFilePath(extension);
 
             try
             {
                 File.WriteAllText(fullPath, content);
+                return new TempFile(fullPath);
             }
             catch
             {
                 SafeDelete(fullPath);
                 throw;
             }
-
-            return new TempFile(fullPath);
         }
 
         #region Helper Methods
@@ -96,6 +99,7 @@ namespace Wincent
             string baseTempDir = Path.GetTempPath();
             string tempDir = Path.Combine(baseTempDir, DirName);
 
+            // Create the custom temp directory if it doesn't exist
             if (!Directory.Exists(tempDir))
             {
                 try
@@ -105,6 +109,7 @@ namespace Wincent
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"Failed to create temp directory: {ex.Message}");
+                    // Fall back to system temp directory if custom directory creation fails
                     tempDir = baseTempDir;
                 }
             }
@@ -122,12 +127,20 @@ namespace Wincent
         /// <summary>
         /// Gets file stream (read mode by default)
         /// </summary>
-        public FileStream OpenRead() => File.OpenRead(FullPath);
+        public FileStream OpenRead()
+        {
+            return _disposed ? throw new ObjectDisposedException(nameof(TempFile)) : File.OpenRead(FullPath);
+        }
 
         /// <summary>
         /// Reads all text content from the file
         /// </summary>
-        public string ReadAllText() => File.ReadAllText(FullPath);
+        public string ReadAllText() => ReadAllText(Encoding.UTF8);
+
+        public string ReadAllText(Encoding encoding)
+        {
+            return _disposed ? throw new ObjectDisposedException(nameof(TempFile)) : File.ReadAllText(FullPath, encoding);
+        }
 
         public void Dispose()
         {
@@ -145,9 +158,9 @@ namespace Wincent
                 if (File.Exists(path))
                     File.Delete(path);
             }
-            catch
+            catch (Exception ex)
             {
-                // Logging or other error handling logic
+                Debug.WriteLine($"TempFile deletion failed: {path}\nError: {ex.Message}");
             }
         }
 

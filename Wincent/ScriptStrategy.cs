@@ -21,16 +21,16 @@ namespace Wincent
 
     public interface IPSScriptStrategy
     {
-        string GenerateScript(string? parameter);
+        string GenerateScript(string parameter);
     }
 
     public abstract class PSScriptStrategyBase : IPSScriptStrategy
     {
         protected const string EncodingSetup = @"
-        $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
-    ";
+            $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+        ";
 
-        public abstract string GenerateScript(string? parameter);
+        public abstract string GenerateScript(string parameter);
     }
 
     public static class ShellNamespaces
@@ -41,7 +41,7 @@ namespace Wincent
 
     public class RefreshExplorerStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter) => $@"
+        public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
             $shellApplication = New-Object -ComObject Shell.Application;
             $windows = $shellApplication.Windows();
@@ -51,7 +51,7 @@ namespace Wincent
 
     public class QueryRecentFileStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter) => $@"
+        public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
             $shell = New-Object -ComObject Shell.Application;
             $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
@@ -62,7 +62,7 @@ namespace Wincent
 
     public class QueryFrequentFolderStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter) => $@"
+        public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
             $shell = New-Object -ComObject Shell.Application;
             $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items() | 
@@ -72,7 +72,7 @@ namespace Wincent
 
     public class QueryQuickAccessStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter) => $@"
+        public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
             $shell = New-Object -ComObject Shell.Application;
             $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
@@ -82,16 +82,16 @@ namespace Wincent
 
     public class CheckQueryFeasibleStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter) => $@"
+        public override string GenerateScript(string parameter) => @"
             $shell = New-Object -ComObject Shell.Application
-            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
-                ForEach-Object {{ $_.Path }}
+            $shell.Namespace('shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}').Items() | 
+                ForEach-Object { $_.Path }
         ";
     }
 
     public class CheckPinUnpinFeasibleStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter) => $@"
+        public override string GenerateScript(string parameter) => $@"
             $shell = New-Object -ComObject Shell.Application
             $shell.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
 
@@ -103,7 +103,7 @@ namespace Wincent
 
     public class RemoveRecentFileStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter)
+        public override string GenerateScript(string parameter)
         {
             if (string.IsNullOrWhiteSpace(parameter))
                 throw new ArgumentException("Valid file path parameter required");
@@ -121,7 +121,7 @@ namespace Wincent
 
     public class PinToFrequentFolderStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter)
+        public override string GenerateScript(string parameter)
         {
             if (string.IsNullOrWhiteSpace(parameter))
                 throw new ArgumentException("Valid file path parameter required");
@@ -136,7 +136,7 @@ namespace Wincent
 
     public class UnpinFromFrequentFolderStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string? parameter)
+        public override string GenerateScript(string parameter)
         {
             if (string.IsNullOrWhiteSpace(parameter))
                 throw new ArgumentException("Valid file path parameter required");

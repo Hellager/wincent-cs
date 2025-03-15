@@ -1,13 +1,38 @@
-﻿using System.Diagnostics;
+﻿using System;
 using System.Text;
+using System.Threading.Tasks;
+using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 using System.Collections.Concurrent;
+using System.IO;
+using Microsoft.PowerShell;
 
 namespace Wincent
 {
-    public record ScriptResult(
-        int ExitCode,
-        string Output,
-        string Error);
+    public enum ExecutionPolicy
+    {
+        Restricted,
+        AllSigned,
+        RemoteSigned,
+        Unrestricted,
+        Bypass,
+        Undefined
+    }
+
+    [Serializable]
+    public class ScriptResult
+    {
+        public int ExitCode { get; }
+        public string Output { get; }
+        public string Error { get; }
+
+        public ScriptResult(int exitCode, string output, string error)
+        {
+            ExitCode = exitCode;
+            Output = output;
+            Error = error;
+        }
+    }
 
     public class ScriptExecutionException : Exception
     {
@@ -57,7 +82,7 @@ namespace Wincent
         public int ProcessId { get; }
 
         public ScriptProcessException(int processId, string message)
-            : base(message, null!, "", "")
+            : base(message, null, "", "")
             => ProcessId = processId;
     }
 
@@ -78,21 +103,52 @@ namespace Wincent
         }
     }
 
-    public sealed class ScriptExecutor(IPSScriptStrategyFactory? strategyFactory = null)
+    public sealed class ScriptExecutor : IDisposable
     {
-        private readonly IPSScriptStrategyFactory _strategyFactory = strategyFactory ?? new DefaultPSScriptStrategyFactory();
-        private static readonly ConcurrentDictionary<PSScript, string> ScriptCache = new();
+        private readonly IPSScriptStrategyFactory _strategyFactory;
+        private static readonly ConcurrentDictionary<PSScript, string> ScriptCache = new ConcurrentDictionary<PSScript, string>();
+        private readonly RunspacePool _runspacePool;
 
-        public string GetScriptContent(PSScript method, string? parameter)
+        public ScriptExecutor(IPSScriptStrategyFactory strategyFactory = null)
+        {
+            _strategyFactory = strategyFactory ?? new DefaultPSScriptStrategyFactory();
+            InitialSessionState initialSessionState = InitialSessionState.CreateDefault();
+            initialSessionState.Commands.Add(new SessionStateCmdletEntry(
+                "Set-ExecutionPolicy",
+                typeof(SetExecutionPolicyCommand),
+                "Set-ExecutionPolicy Bypass -Scope Process"));
+
+            _runspacePool = RunspaceFactory.CreateRunspacePool(initialSessionState);
+            _runspacePool.SetMaxRunspaces(5);
+            _runspacePool.ThreadOptions = PSThreadOptions.UseNewThread;
+            _runspacePool.Open();
+        }
+
+        public class SetExecutionPolicyCommand : PSCmdlet
+        {
+            [Parameter(Position = 0)]
+            public ExecutionPolicy ExecutionPolicy { get; set; }
+
+            [Parameter(Position = 1)]
+            public ExecutionPolicyScope Scope { get; set; } = ExecutionPolicyScope.Process;
+
+            protected override void ProcessRecord()
+            {
+            
+            }
+        }
+
+        public string GetScriptContent(PSScript method, string parameter)
         {
             if (!Enum.IsDefined(typeof(PSScript), method))
                 throw new ArgumentOutOfRangeException(nameof(method), "Invalid script type");
 
             try
             {
-                var strategy = _strategyFactory.GetStrategy(method);
-
-                return strategy.GenerateScript(parameter);
+                return ScriptCache.GetOrAdd(method, key => {
+                    var strategy = _strategyFactory.GetStrategy(key);
+                    return strategy.GenerateScript(parameter);
+                });
             }
             catch (NotSupportedException ex)
             {
@@ -100,39 +156,32 @@ namespace Wincent
             }
         }
 
-        /// <summary>
-        /// Execute PowerShell script (text content)
-        /// </summary>
-        /// <param name="scriptContent">Script content</param>
-        /// <param name="timeout">Timeout (unlimited by default)</param>
         public async Task<ScriptResult> ExecutePowerShellScriptAsync(
             string scriptContent,
             TimeSpan? timeout = null)
         {
+            if (string.IsNullOrWhiteSpace(scriptContent))
+                throw new ArgumentNullException(nameof(scriptContent));
+
             byte[] contentBytes = AddUtf8Bom(Encoding.UTF8.GetBytes(scriptContent));
-            using var tempFile = TempFile.Create(contentBytes, "ps1");
-            return await ExecuteCoreAsync(tempFile.FullPath, timeout);
+            using (var tempFile = TempFile.Create(contentBytes, "ps1"))
+            {
+                return await ExecuteCoreAsync(tempFile.FullPath, timeout);
+            }
         }
 
-        /// <summary>
-        /// Execute PowerShell script (binary content)
-        /// </summary>
-        /// <param name="scriptBytes">Script byte array</param>
-        /// <param name="extension">File extension</param>
-        /// <param name="timeout">Timeout</param>
         public async Task<ScriptResult> ExecutePowerShellScriptAsync(
             byte[] scriptBytes,
             string extension = "ps1",
             TimeSpan? timeout = null)
         {
             byte[] contentWithBom = AddUtf8Bom(scriptBytes);
-            using var tempFile = TempFile.Create(contentWithBom, extension);
-            return await ExecuteCoreAsync(tempFile.FullPath, timeout);
+            using (var tempFile = TempFile.Create(contentWithBom, extension))
+            {
+                return await ExecuteCoreAsync(tempFile.FullPath, timeout);
+            }
         }
 
-        /// <summary>
-        /// Ensure byte array starts with UTF8-BOM
-        /// </summary>
         public static byte[] AddUtf8Bom(byte[] content)
         {
             byte[] bom = Encoding.UTF8.GetPreamble();
@@ -164,122 +213,62 @@ namespace Wincent
             string scriptPath,
             TimeSpan? timeout)
         {
-            var processStartInfo = new ProcessStartInfo
+            using (var powerShell = PowerShell.Create())
             {
-                FileName = GetPowerShellPath(),
-                Arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
+                powerShell.RunspacePool = _runspacePool;
+                powerShell.AddCommand(scriptPath);
 
-            var output = new StringBuilder();
-            var error = new StringBuilder();
+                var output = new PSDataCollection<PSObject>();
+                var errors = new PSDataCollection<ErrorRecord>();
+                var outputResult = new StringBuilder();
+                var errorResult = new StringBuilder();
 
-            using var process = new Process { StartInfo = processStartInfo };
-            using var cts = timeout.HasValue
-                ? new CancellationTokenSource(timeout.Value)
-                : new CancellationTokenSource();
+                var asyncResult = powerShell.BeginInvoke<PSObject, PSObject>(null, output);
 
-            try
-            {
-                process.Start();
-
-                var readOutputTask = ReadStreamAsync(process.StandardOutput);
-                var readErrorTask = ReadStreamAsync(process.StandardError);
+                output.DataAdded += (s, e) => CaptureOutput(output, outputResult);
+                errors.DataAdded += (s, e) => CaptureErrors(errors, errorResult);
 
                 try
                 {
-                    await process.WaitForExitAsync(cts.Token);
-
-                    output.Append(await readOutputTask);
-                    error.Append(await readErrorTask);
+                    await WaitForCompletion(asyncResult, timeout);
                 }
-                catch (OperationCanceledException)
+                catch (TimeoutException)
                 {
-                    if (!process.HasExited)
-                    {
-                        process.Kill();
-                        await Task.Delay(100);
-                    }
-
-                    using var outputCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-                    try
-                    {
-                        output.Append(await readOutputTask.WaitAsync(outputCts.Token));
-                        error.Append(await readErrorTask.WaitAsync(outputCts.Token));
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // If reading times out, use existing content
-                    }
-
+                    powerShell.Stop();
                     throw new ScriptTimeoutException(
-                        $"Script execution timed out ({timeout})",
-                        output.ToString(),
-                        error.ToString().Trim());
+                        $"Execution timed out after {timeout}",
+                        outputResult.ToString(),
+                        errorResult.ToString());
                 }
-
-                int exitCode = process.ExitCode;
-                string errorOutput = error.ToString().Trim();
-                if (exitCode == 0 && !string.IsNullOrEmpty(errorOutput))
+                catch (RuntimeException ex)
                 {
-                    exitCode = -1;
+                    throw new ScriptExecutionException(
+                        "PowerShell runtime error",
+                        ex,
+                        outputResult.ToString(),
+                        errorResult.ToString());
                 }
 
                 return new ScriptResult(
-                    exitCode,
-                    output.ToString(),
-                    errorOutput);
+                    powerShell.HadErrors ? -1 : 0,
+                    outputResult.ToString(),
+                    errorResult.ToString());
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException || ex is ScriptTimeoutException))
-            {
-                try
-                {
-                    if (!process.HasExited)
-                        process.Kill();
-                }
-                catch { /* Ignore errors when terminating process */ }
-
-                throw new ScriptExecutionException(
-                    "Script execution failed",
-                    ex,
-                    output.ToString(),
-                    error.ToString().Trim());
-            }
-        }
-
-        private async Task<string> ReadStreamAsync(StreamReader reader)
-        {
-            var output = new StringBuilder();
-            char[] buffer = new char[1024];
-
-            while (true)
-            {
-                int bytesRead = await reader.ReadAsync(buffer);
-                if (bytesRead == 0) break;
-                output.Append(buffer, 0, bytesRead);
-            }
-
-            return output.ToString();
-        }
-
-        private static string GetPowerShellPath()
-        {
-            return OperatingSystem.IsWindows()
-                ? "powershell.exe"
-                : "pwsh";
         }
 
         internal static bool FileOrDirectoryExists(string name)
         {
-            return (Directory.Exists(name) || File.Exists(name));
+            try
+            {
+                return File.GetAttributes(name) != (FileAttributes)(-1);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
-        public static async Task<ScriptResult> ExecutePSScript(PSScript method, string? para)
+        public static async Task<ScriptResult> ExecutePSScript(PSScript method, string para)
         {
             var executor = new ScriptExecutor();
 
@@ -303,6 +292,49 @@ namespace Wincent
             catch (ScriptExecutionException ex)
             {
                 return new ScriptResult(-1, "", ex.Message);
+            }
+        }
+
+        private void CaptureOutput(PSDataCollection<PSObject> source, StringBuilder target)
+        {
+            foreach (var item in source.ReadAll())
+            {
+                target.AppendLine(item.ToString());
+            }
+        }
+
+        private void CaptureErrors(PSDataCollection<ErrorRecord> source, StringBuilder target)
+        {
+            foreach (var error in source.ReadAll())
+            {
+                target.AppendLine(error.ToString());
+            }
+        }
+
+        private async Task WaitForCompletion(IAsyncResult asyncResult, TimeSpan? timeout)
+        {
+            var completionTask = Task.Factory.FromAsync(
+                asyncResult,
+                result => { /* EndInvoke will auto handle */ });
+
+            if (timeout.HasValue)
+            {
+                await Task.WhenAny(completionTask, Task.Delay(timeout.Value));
+                if (!completionTask.IsCompleted)
+                {
+                    throw new TimeoutException();
+                }
+            }
+
+            await completionTask;
+        }
+
+        public void Dispose()
+        {
+            if (_runspacePool != null)
+            {
+                _runspacePool.Close();
+                _runspacePool.Dispose();
             }
         }
     }
