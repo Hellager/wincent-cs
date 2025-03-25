@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wincent", "Wincent\Wincent.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestConsole", "TestConsole\TestConsole.csproj", "{6C39F410-7467-44E6-B03C-E0A57A3862FB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestWincent", "TestWincent\TestWincent.csproj", "{4791C5AA-7E1D-4AAA-80BE-B7583B42AF8D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{6C39F410-7467-44E6-B03C-E0A57A3862FB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6C39F410-7467-44E6-B03C-E0A57A3862FB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6C39F410-7467-44E6-B03C-E0A57A3862FB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4791C5AA-7E1D-4AAA-80BE-B7583B42AF8D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4791C5AA-7E1D-4AAA-80BE-B7583B42AF8D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4791C5AA-7E1D-4AAA-80BE-B7583B42AF8D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4791C5AA-7E1D-4AAA-80BE-B7583B42AF8D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
