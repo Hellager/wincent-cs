@@ -306,35 +306,10 @@ namespace Wincent
             }
         }
 
-        internal static void EmptyQuickAccess()
+        public static void EmptyQuickAccess()
         {
             EmptyRecentFiles();
             EmptyFrequentFolders();
-        }
-
-        private static async Task ExecuteAddOperation(string path, QuickAccessItemType itemType)
-        {
-            if (itemType == QuickAccessItemType.File)
-            {
-                AddFileToRecentDocs(path);
-            }
-            else
-            {
-                var result = await ScriptExecutor.ExecutePSScript(PSScript.PinToFrequentFolder, path);
-                if (result.ExitCode != 0)
-                    throw new QuickAccessOperationException($"Addition failed: {result.Error}.");
-            }
-        }
-
-        private static async Task ExecuteRemoveOperation(string path, QuickAccessItemType itemType)
-        {
-            var script = (itemType == QuickAccessItemType.File) ?
-                PSScript.RemoveRecentFile :
-                PSScript.UnpinFromFrequentFolder;
-
-            var result = await ScriptExecutor.ExecutePSScript(script, path);
-            if (result.ExitCode != 0)
-                throw new QuickAccessOperationException($"Removal failed: {result.Error}.");
         }
 
         public static void ValidatePathSecurity(string path, QuickAccessItemType expectedType)
