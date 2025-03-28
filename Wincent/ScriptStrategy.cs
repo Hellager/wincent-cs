@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Wincent
 {
@@ -82,16 +79,18 @@ namespace Wincent
 
     public class CheckQueryFeasibleStrategy : PSScriptStrategyBase
     {
-        public override string GenerateScript(string parameter) => @"
+        public override string GenerateScript(string parameter) => $@"
+            {EncodingSetup}
             $shell = New-Object -ComObject Shell.Application
-            $shell.Namespace('shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}').Items() | 
-                ForEach-Object { $_.Path }
+            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
+                ForEach-Object {{ $_.Path }}
         ";
     }
 
     public class CheckPinUnpinFeasibleStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
+            {EncodingSetup}
             $shell = New-Object -ComObject Shell.Application
             $shell.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
 
