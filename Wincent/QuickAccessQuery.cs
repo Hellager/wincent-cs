@@ -13,18 +13,94 @@ namespace Wincent
         FrequentFolders
     }
 
+    /// <summary>
+    /// Static class providing quick access item query functionality
+    /// </summary>
     public static class QuickAccessQuery
     {
+        // Internal interface for dependency injection
+        internal interface IScriptExecutorService
+        {
+            Task<ScriptResult> ExecutePSScript(PSScript scriptType, string parameter);
+        }
+
+        internal interface IExecutionFeasibleService
+        {
+            bool CheckScriptFeasible();
+            bool IsAdministrator();
+            void FixExecutionPolicy();
+        }
+
+        // Default implementation
+        private class DefaultScriptExecutorService : IScriptExecutorService
+        {
+            public Task<ScriptResult> ExecutePSScript(PSScript scriptType, string parameter)
+            {
+                return ScriptExecutor.ExecutePSScript(scriptType, parameter);
+            }
+        }
+
+        private class DefaultExecutionFeasibleService : IExecutionFeasibleService
+        {
+            public bool CheckScriptFeasible()
+            {
+                return ExecutionFeasible.CheckScriptFeasible();
+            }
+
+            public bool IsAdministrator()
+            {
+                return ExecutionFeasible.IsAdministrator();
+            }
+
+            public void FixExecutionPolicy()
+            {
+                ExecutionFeasible.FixExecutionPolicy();
+            }
+        }
+
+        // Service instances
+        private static IScriptExecutorService _scriptExecutorService = new DefaultScriptExecutorService();
+        private static IExecutionFeasibleService _executionFeasibleService = new DefaultExecutionFeasibleService();
+
+        // Service replacement method for testing
+        internal static void SetServices(IScriptExecutorService scriptExecutor, IExecutionFeasibleService executionFeasible)
+        {
+            _scriptExecutorService = scriptExecutor ?? new DefaultScriptExecutorService();
+            _executionFeasibleService = executionFeasible ?? new DefaultExecutionFeasibleService();
+        }
+
+        // Service reset method for testing
+        internal static void ResetServices()
+        {
+            _scriptExecutorService = new DefaultScriptExecutorService();
+            _executionFeasibleService = new DefaultExecutionFeasibleService();
+        }
+
+        /// <summary>
+        /// Retrieves the list of recent files
+        /// </summary>
+        /// <param name="maxRetries">Maximum number of retries</param>
+        /// <returns>List of recent file paths</returns>
         public static async Task<List<string>> GetRecentFilesAsync(int maxRetries = 2)
         {
             return await ExecuteWithValidationAsync(QuickAccessType.RecentFiles, maxRetries);
         }
 
+        /// <summary>
+        /// Retrieves the list of frequent folders
+        /// </summary>
+        /// <param name="maxRetries">Maximum number of retries</param>
+        /// <returns>List of frequent folder paths</returns>
         public static async Task<List<string>> GetFrequentFoldersAsync(int maxRetries = 2)
         {
             return await ExecuteWithValidationAsync(QuickAccessType.FrequentFolders, maxRetries);
         }
 
+        /// <summary>
+        /// Retrieves all quick access items
+        /// </summary>
+        /// <param name="maxRetries">Maximum number of retries</param>
+        /// <returns>List of all quick access item paths</returns>
         public static async Task<List<string>> GetAllItemsAsync(int maxRetries = 2)
         {
             return await ExecuteWithValidationAsync(QuickAccessType.All, maxRetries);
@@ -40,7 +116,7 @@ namespace Wincent
                 {
                     return await QueryItemsAsync(queryType);
                 }
-                catch (ScriptExecutionException ex) when (attempt < maxRetries)
+                catch (ScriptExecutionException ex) when (attempt <= maxRetries)
                 {
                     HandleTransientError(ex, queryType, attempt);
                 }
@@ -50,14 +126,14 @@ namespace Wincent
 
         private static void ValidateExecutionPrerequisites(QuickAccessType queryType)
         {
-            if (!ExecutionFeasible.CheckScriptFeasible())
+            if (!_executionFeasibleService.CheckScriptFeasible())
                 throw new SecurityException("PowerShell execution policy restrictions.");
         }
 
         private static async Task<List<string>> QueryItemsAsync(QuickAccessType queryType)
         {
             var scriptType = MapToScriptType(queryType);
-            var result = await ScriptExecutor.ExecutePSScript(scriptType, null);
+            var result = await _scriptExecutorService.ExecutePSScript(scriptType, null);
 
             if (result.ExitCode != 0)
                 throw new ScriptExecutionException("wrong exit code", result.Error, result.Output);
@@ -92,9 +168,9 @@ namespace Wincent
         {
             System.Diagnostics.Debug.WriteLine($"Attempt {attempt} failed: {ex.Message}.");
 
-            if (ExecutionFeasible.IsAdministrator())
+            if (_executionFeasibleService.IsAdministrator())
             {
-                try { ExecutionFeasible.FixExecutionPolicy(); }
+                try { _executionFeasibleService.FixExecutionPolicy(); }
                 catch { /* Ignore failed fixing */ }
             }
         }
