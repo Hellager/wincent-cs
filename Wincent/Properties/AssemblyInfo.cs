@@ -36,3 +36,6 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyVersion("0.1.3.0")]
 [assembly: AssemblyFileVersion("0.1.3.0")]
 [assembly: NeutralResourcesLanguage("")]
+
+// 允许测试程序集访问内部成员
+[assembly: InternalsVisibleTo("TestWincent")]
