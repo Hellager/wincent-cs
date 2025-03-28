@@ -9,9 +9,9 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("Wincent")]
 [assembly: AssemblyDescription("Manage Windows quick access")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
+[assembly: AssemblyCompany("SteinGu")]
 [assembly: AssemblyProduct("Wincent")]
-[assembly: AssemblyCopyright("Stein Gu ©  2025")]
+[assembly: AssemblyCopyright("SteinGu ©  2025")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
-    <metadata>
-        <id>Wincent</id>
-        <version>0.1.2</version>
-        <title>Wincent</title>
-        <authors>Stein Gu</authors>
-        <owners>Stein Gu</owners>
-        <description>Windows Quick Access management library</description>
-        <projectUrl>https://github.com/Hellager/wincent-cs</projectUrl>
-        <license type="expression">MIT</license>
-        <requireLicenseAcceptance>false</requireLicenseAcceptance>
-        <releaseNotes>Able to manage quick access.</releaseNotes>
-        <tags>Windows QuickAccess Explorer</tags>
-    </metadata>
+<package >
+  <metadata>
+    <id>$id$</id>
+    <version>$version$</version>
+    <title>$title$</title>
+    <authors>SteinGu</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <!-- <icon>icon.png</icon> -->
+    <projectUrl>https://github.com/Hellager/wincent-cs</projectUrl>
+    <description>$description$</description>
+    <releaseNotes>Able to query and manage quick access</releaseNotes>
+    <copyright>$copyright$</copyright>
+    <tags>Window QuickAccess</tags>
+  </metadata>
 </package>
