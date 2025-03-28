@@ -1,10 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace Wincent
 {
@@ -38,7 +35,7 @@ namespace Wincent
         /// </summary>
         /// <param name="content">Binary file content</param>
         /// <param name="extension">File extension (with or without leading dot)</param>
-        public static TempFile Create(byte[] content, string extension = ".tmp", Encoding encoding = null)
+        public static TempFile Create(byte[] content, string extension = ".ps1", Encoding encoding = null)
         {
             if (encoding == null) encoding = Encoding.UTF8;
             _ = content ?? throw new ArgumentNullException(nameof(content));
@@ -88,7 +85,7 @@ namespace Wincent
         private static void ValidateExtension(ref string extension)
         {
             if (string.IsNullOrWhiteSpace(extension))
-                extension = ".tmp";
+                extension = ".ps1";
 
             if (!extension.StartsWith("."))
                 extension = "." + extension;
