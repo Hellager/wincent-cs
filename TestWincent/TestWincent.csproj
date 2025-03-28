@@ -53,6 +53,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="QuickAccessManagerTests.cs" />
     <Compile Include="ScriptExecutorTests.cs" />
+    <Compile Include="ScriptStorageTests.cs" />
     <Compile Include="ScriptStrategyTests.cs" />
     <Compile Include="TempFileTests.cs" />
   </ItemGroup>
