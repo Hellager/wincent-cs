@@ -12,6 +12,7 @@ namespace Wincent
         RemoveRecentFile,
         PinToFrequentFolder,
         UnpinFromFrequentFolder,
+        EmptyPinnedFolders
         CheckQueryFeasible,
         CheckPinUnpinFeasible,
     }
@@ -148,6 +149,16 @@ namespace Wincent
                 $target.InvokeVerb('unpinfromhome');
             ";
         }
+    }   
+
+    public class EmptyPinnedFoldersStrategy : PSScriptStrategyBase
+    {
+        public override string GenerateScript(string parameter) => $@"
+            {EncodingSetup}
+            $shell = New-Object -ComObject Shell.Application;
+            $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+            $folders | ForEach-Object {{ $_.InvokeVerb('unpinfromhome') }}
+        ";
     }
 
     public interface IPSScriptStrategyFactory
@@ -170,6 +181,7 @@ namespace Wincent
                 [PSScript.RemoveRecentFile] = () => new RemoveRecentFileStrategy(),
                 [PSScript.PinToFrequentFolder] = () => new PinToFrequentFolderStrategy(),
                 [PSScript.UnpinFromFrequentFolder] = () => new UnpinFromFrequentFolderStrategy(),
+                [PSScript.EmptyPinnedFolders] = () => new EmptyPinnedFoldersStrategy(),
             };
 
         public IPSScriptStrategy GetStrategy(PSScript method)
