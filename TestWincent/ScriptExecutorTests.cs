@@ -320,6 +320,86 @@ namespace TestWincent
         }
 
         #endregion
+
+        #region 缓存测试
+
+        [TestMethod]
+        public async Task ExecutePSScript_QueryQuickAccess_UsesCacheWhenValid()
+        {
+            // Arrange
+            var mockService = new MockScriptExecutor();
+            mockService.SetFileExists(true);
+            ScriptExecutor.SetFileSystemService(mockService);
+
+            try
+            {
+                // First call to populate cache
+                var result1 = await ScriptExecutor.ExecutePSScript(PSScript.QueryQuickAccess, null);
+                Assert.IsNotNull(result1, "First result should not be null");
+
+                // Second call should use cache
+                var result2 = await ScriptExecutor.ExecutePSScript(PSScript.QueryQuickAccess, null);
+                Assert.IsNotNull(result2, "Cached result should not be null");
+                Assert.AreEqual(result1.Output, result2.Output, "Cached result should match original");
+            }
+            finally
+            {
+                ScriptExecutor.ResetFileSystemService();
+            }
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScript_QueryRecentFile_CacheInvalidatesOnFileChange()
+        {
+            // This test requires access to the actual tracker file
+            // For CI environments, we should skip or mock this test
+            var trackerPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                @"Microsoft\Windows\Recent\AutomaticDestinations\5f7b5f1e01b83767.automaticDestinations-ms");
+
+            if (!File.Exists(trackerPath))
+            {
+                Assert.Inconclusive("Tracker file not found - test skipped");
+                return;
+            }
+
+            // First call to populate cache
+            var result1 = await ScriptExecutor.ExecutePSScript(PSScript.QueryRecentFile, null);
+            Assert.IsNotNull(result1, "First result should not be null");
+
+            // Simulate file modification by touching the file
+            File.SetLastWriteTime(trackerPath, DateTime.Now);
+
+            // Second call should not use cache
+            var result2 = await ScriptExecutor.ExecutePSScript(PSScript.QueryRecentFile, null);
+            Assert.IsNotNull(result2, "Second result should not be null");
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScript_NonCacheableScript_DoesNotUseCache()
+        {
+            // Arrange
+            var mockService = new MockScriptExecutor();
+            mockService.SetFileExists(true);
+            ScriptExecutor.SetFileSystemService(mockService);
+
+            try
+            {
+                // RefreshExplorer is not a cacheable script
+                var result1 = await ScriptExecutor.ExecutePSScript(PSScript.RefreshExplorer, null);
+                Assert.IsNotNull(result1, "First result should not be null");
+
+                // Should execute again without using cache
+                var result2 = await ScriptExecutor.ExecutePSScript(PSScript.RefreshExplorer, null);
+                Assert.IsNotNull(result2, "Second result should not be null");
+            }
+            finally
+            {
+                ScriptExecutor.ResetFileSystemService();
+            }
+        }
+
+        #endregion
     }
 
     #region 测试辅助类

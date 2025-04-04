@@ -103,6 +103,8 @@ namespace Wincent
 
     public sealed class ScriptExecutor : IDisposable
     {
+        private static readonly ScriptResultCache _cache = new ScriptResultCache();
+
         /// <summary>
         /// File system service interface for dependency injection
         /// </summary>
@@ -256,6 +258,13 @@ namespace Wincent
         {
             try
             {
+                // Try get from cache first
+                var cachedResult = _cache.GetCachedResult(method);
+                if (cachedResult != null)
+                {
+                    return cachedResult;
+                }
+
                 if (para != null)
                 {
                     var isValid = FileOrDirectoryExists(para);
@@ -281,6 +290,13 @@ namespace Wincent
                 try
                 {
                     var result = await executor.ExecuteCoreAsync(scriptPath, TimeSpan.FromSeconds(5));
+                    
+                    // Update cache if successful
+                    if (result.ExitCode == 0)
+                    {
+                        _cache.UpdateCache(method, result);
+                    }
+                    
                     return result;
                 }
                 catch (ScriptExecutionException ex)

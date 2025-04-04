@@ -12,7 +12,7 @@ namespace Wincent
         RemoveRecentFile,
         PinToFrequentFolder,
         UnpinFromFrequentFolder,
-        EmptyPinnedFolders
+        EmptyPinnedFolders,
         CheckQueryFeasible,
         CheckPinUnpinFeasible,
     }
