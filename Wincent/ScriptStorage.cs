@@ -2,11 +2,17 @@
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Reflection;
 
 namespace Wincent
 {
     public static class ScriptStorage
     {
+        /// <summary>
+        /// Current script version from assembly version (major.minor.build)
+        /// </summary>
+        private static readonly string CurrentVersion = GetCurrentVersion();
+
         /// <summary>
         /// Script root directory located under Windows Temp directory in 'Wincent' folder
         /// </summary>
@@ -36,13 +42,22 @@ namespace Wincent
         }
 
         /// <summary>
+        /// Gets the current version from assembly version (major.minor.build)
+        /// </summary>
+        private static string GetCurrentVersion()
+        {
+            var version = Assembly.GetExecutingAssembly().GetName().Version;
+            return $"v{version.Major}.{version.Minor}.{version.Build}";
+        }
+
+        /// <summary>
         /// Gets the full script path, creates the script if not exist
         /// </summary>
         /// <param name="script">Script type</param>
         /// <returns>Full path to script file</returns>
         public static string GetScriptPath(PSScript script)
         {
-            var fileName = $"{script}.generated.ps1";
+            var fileName = $"{script}_{CurrentVersion}.ps1";
 
             // Select directory based on script type
             string directory = IsParameterizedScript(script) ? DynamicScriptDir : StaticScriptDir;
@@ -87,9 +102,9 @@ namespace Wincent
             if (string.IsNullOrEmpty(parameter))
                 throw new ArgumentException("Parameter cannot be null or empty for parameterized scripts");
 
-            // Create unique filename using parameter hash
+            // Create unique filename using parameter hash and version
             string paramHash = GetParameterHash(parameter);
-            string fileName = $"{script}_{paramHash}.generated.ps1";
+            string fileName = $"{script}_{CurrentVersion}_{paramHash}.ps1";
             string scriptPath = Path.Combine(DynamicScriptDir, fileName);
 
             // Create script if not exists
@@ -131,7 +146,7 @@ namespace Wincent
         }
 
         /// <summary>
-        /// Cleans up expired dynamic scripts
+        /// Cleans up expired dynamic scripts and scripts with different versions
         /// </summary>
         /// <param name="maxAgeHours">Maximum retention time in hours</param>
         public static void CleanupDynamicScripts(int maxAgeHours = 24)
@@ -141,9 +156,47 @@ namespace Wincent
                 var directory = new DirectoryInfo(DynamicScriptDir);
                 var cutoffTime = DateTime.Now.AddHours(-maxAgeHours);
 
-                foreach (var file in directory.GetFiles("*.generated.ps1"))
+                foreach (var file in directory.GetFiles("*.ps1"))
                 {
+                    bool shouldDelete = false;
+                    
+                    // Check if file is expired
                     if (file.LastWriteTime < cutoffTime)
+                    {
+                        shouldDelete = true;
+                    }
+                    
+                    // Check if version is different
+                    if (!shouldDelete)
+                    {
+                        var fileName = file.Name;
+                        var versionPart = fileName.Split('_').ElementAtOrDefault(1);
+                        if (versionPart != null && versionPart != CurrentVersion)
+                        {
+                            shouldDelete = true;
+                        }
+                    }
+
+                    if (shouldDelete)
+                    {
+                        try
+                        {
+                            file.Delete();
+                        }
+                        catch
+                        {
+                            // Ignore deletion failures
+                        }
+                    }
+                }
+
+                // Also clean static scripts with different versions
+                directory = new DirectoryInfo(StaticScriptDir);
+                foreach (var file in directory.GetFiles("*.ps1"))
+                {
+                    var fileName = file.Name;
+                    var versionPart = fileName.Split('_').ElementAtOrDefault(1);
+                    if (versionPart != null && versionPart != CurrentVersion)
                     {
                         try
                         {
