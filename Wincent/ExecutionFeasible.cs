@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.Security;
 using System.Security.Principal;
+using System.Threading.Tasks;
 
 namespace Wincent
 {
@@ -162,6 +163,38 @@ namespace Wincent
                     return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Checks if quick access query functionality is available
+        /// </summary>
+        public static async Task<bool> CheckQueryFeasible()
+        {
+            try
+            {
+                var result = await ScriptExecutor.ExecutePSScript(PSScript.CheckQueryFeasible, null);
+                return result.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Checks if pin/unpin functionality is available
+        /// </summary>
+        public static async Task<bool> CheckPinUnpinFeasible()
+        {
+            try
+            {
+                var result = await ScriptExecutor.ExecutePSScript(PSScript.CheckPinUnpinFeasible, null);
+                return result.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 

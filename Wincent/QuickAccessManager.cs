@@ -14,105 +14,78 @@ namespace Wincent
     /// <summary>
     /// Static class providing quick access item management functionality
     /// </summary>
-    public static class QuickAccessManager
+    public class QuickAccessManager
     {
-        private const uint SHARD_PATHW = 0x00000003;
-        private const int COINIT_APARTMENTTHREADED = 0x2;
+        private readonly IFileSystemService _fileSystemService;
+        private bool _isInitialized;
+        private readonly object _initLock = new object();
+        private bool _queryFeasible;
+        private bool _pinUnpinFeasible;
 
-        private static Guid FOLDERID_Recent = new Guid("{AE50C081-EBD2-438A-8655-8A092E34987A}");
-
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        private static extern void SHAddToRecentDocs(uint uFlags, IntPtr pv);
-
-        [DllImport("ole32.dll")]
-        private static extern int CoInitializeEx(IntPtr reserved, uint dwCoInit);
-
-        [DllImport("ole32.dll")]
-        private static extern void CoUninitialize();
-
-        [DllImport("shell32.dll")]
-        private static extern int SHGetKnownFolderPath(
-            [MarshalAs(UnmanagedType.LPStruct)] Guid rfid,
-            uint dwFlags,
-            IntPtr hToken,
-            out IntPtr ppszPath);
-
-        [DllImport("ole32.dll")]
-        private static extern void CoTaskMemFree(IntPtr ptr);
-
-        private static readonly string[] ProtectedPaths = { "System32", "Program Files" };
-
-        // Internal interface for dependency injection
-        internal interface IFileSystemService
+        public QuickAccessManager() : this(new DefaultFileSystemService())
         {
-            bool FileExists(string path);
-            bool DirectoryExists(string path);
-            string GetFileExtension(string path);
-            Task<bool> ExecuteScriptAsync(PSScript scriptType, string parameter);
-            void AddFileToRecentDocs(string path);
-            void EmptyRecentFiles();
-            void EmptyFrequentFolders();
-            void ValidatePathSecurity(string path, QuickAccessItemType itemType);
         }
 
-        // Default implementation
-        private class DefaultFileSystemService : IFileSystemService
+        internal QuickAccessManager(IFileSystemService fileSystemService)
         {
-            public bool FileExists(string path)
-            {
-                return File.Exists(path);
-            }
-
-            public bool DirectoryExists(string path)
-            {
-                return Directory.Exists(path);
-            }
-
-            public string GetFileExtension(string path)
-            {
-                return Path.GetExtension(path);
-            }
-
-            public async Task<bool> ExecuteScriptAsync(PSScript scriptType, string parameter)
-            {
-                var result = await ScriptExecutor.ExecutePSScript(scriptType, parameter);
-                return result.ExitCode == 0;
-            }
-
-            public void AddFileToRecentDocs(string path)
-            {
-                QuickAccessManager.AddFileToRecentDocs(path);
-            }
-
-            public void EmptyRecentFiles()
-            {
-                QuickAccessManager.EmptyRecentFiles();
-            }
-
-            public void EmptyFrequentFolders()
-            {
-                QuickAccessManager.EmptyFrequentFolders();
-            }
-
-            public void ValidatePathSecurity(string path, QuickAccessItemType itemType)
-            {
-                QuickAccessManager.ValidatePathSecurity(path, itemType);
-            }
+            _fileSystemService = fileSystemService;
         }
 
-        // Service instances
-        private static IFileSystemService _fileSystemService = new DefaultFileSystemService();
-
-        // Service replacement method for testing
-        internal static void SetFileSystemService(IFileSystemService service)
+        private async Task EnsureInitializedAsync()
         {
-            _fileSystemService = service ?? new DefaultFileSystemService();
+            if (_isInitialized) return;
+
+            lock (_initLock)
+            {
+                if (_isInitialized) return;
+
+                // Check script execution policy
+                if (!_fileSystemService.CheckScriptFeasible())
+                {
+                    try
+                    {
+                        _fileSystemService.FixExecutionPolicy();
+                    }
+                    catch
+                    {
+                        // Ignore fix failures
+                    }
+                }
+
+                _isInitialized = true;
+            }
+
+            // Check specific functionalities
+            _queryFeasible = await _fileSystemService.CheckQueryFeasibleAsync();
+            _pinUnpinFeasible = await _fileSystemService.CheckPinUnpinFeasibleAsync();
         }
 
-        // Service reset method for testing
-        internal static void ResetFileSystemService()
+        /// <summary>
+        /// Checks if an item exists in quick access
+        /// </summary>
+        public async Task<bool> CheckItemAsync(string path, QuickAccessItemType itemType)
         {
-            _fileSystemService = new DefaultFileSystemService();
+            try
+            {
+                await EnsureInitializedAsync();
+                if (!_queryFeasible)
+                    throw new QuickAccessFeasibilityException("Quick access query functionality is not available");
+
+                _fileSystemService.ValidatePathSecurity(path, itemType);
+
+                var items = await GetQuickAccessItemsAsync();
+                return items.Contains(path, StringComparer.OrdinalIgnoreCase);
+            }
+            catch (QuickAccessFeasibilityException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // 记录异常但不抛出
+                System.Diagnostics.Debug.WriteLine($"Error checking quick access item: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -120,7 +93,7 @@ namespace Wincent
         /// </summary>
         /// <param name="path">Folder path to add</param>
         /// <returns>Whether the operation succeeded</returns>
-        internal static async Task<bool> PinToFrequentFolderAsync(string path)
+        internal async Task<bool> PinToFrequentFolderAsync(string path)
         {
             if (string.IsNullOrWhiteSpace(path))
                 return false;
@@ -138,7 +111,7 @@ namespace Wincent
         /// </summary>
         /// <param name="path">Folder path to remove</param>
         /// <returns>Whether the operation succeeded</returns>
-        internal static async Task<bool> UnpinFromFrequentFolderAsync(string path)
+        internal async Task<bool> UnpinFromFrequentFolderAsync(string path)
         {
             if (string.IsNullOrWhiteSpace(path))
                 return false;
@@ -151,7 +124,7 @@ namespace Wincent
         /// </summary>
         /// <param name="path">File path to add</param>
         /// <returns>Whether the operation succeeded</returns>
-        internal static async Task<bool> AddToRecentFilesAsync(string path)
+        internal async Task<bool> AddToRecentFilesAsync(string path)
         {
             if (string.IsNullOrWhiteSpace(path) || !_fileSystemService.FileExists(path))
                 return false;
@@ -171,23 +144,23 @@ namespace Wincent
             }
         }
 
-        internal static void AddFileToRecentDocs(string filePath)
+        internal void AddFileToRecentDocs(string filePath)
         {
             ValidatePath(filePath, QuickAccessItemType.File);
 
             IntPtr pathPtr = IntPtr.Zero;
             try
             {
-                int hr = CoInitializeEx(IntPtr.Zero, COINIT_APARTMENTTHREADED);
+                int hr = NativeMethods.CoInitializeEx(IntPtr.Zero, NativeMethods.COINIT_APARTMENTTHREADED);
                 if (hr < 0) throw new Win32Exception(hr, "COM initialization failed");
 
                 pathPtr = Marshal.StringToHGlobalUni(filePath);
-                SHAddToRecentDocs(SHARD_PATHW, pathPtr);
+                NativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, pathPtr);
             }
             finally
             {
                 if (pathPtr != IntPtr.Zero) Marshal.FreeHGlobal(pathPtr);
-                CoUninitialize();
+                NativeMethods.CoUninitialize();
             }
         }
 
@@ -196,7 +169,7 @@ namespace Wincent
         /// </summary>
         /// <param name="path">File path to remove</param>
         /// <returns>Whether the operation succeeded</returns>
-        internal static async Task<bool> RemoveFromRecentFilesAsync(string path)
+        internal async Task<bool> RemoveFromRecentFilesAsync(string path)
         {
             if (string.IsNullOrWhiteSpace(path) || !_fileSystemService.FileExists(path))
                 return false;
@@ -212,7 +185,7 @@ namespace Wincent
         /// Clears recent files list
         /// </summary>
         /// <returns>Whether the operation succeeded</returns>
-        internal static async Task<bool> ClearRecentFilesAsync()
+        internal async Task<bool> ClearRecentFilesAsync()
         {
             try
             {
@@ -229,7 +202,7 @@ namespace Wincent
         /// Clears frequent folders list
         /// </summary>
         /// <returns>Whether the operation succeeded</returns>
-        internal static async Task<bool> ClearFrequentFoldersAsync()
+        internal async Task<bool> ClearFrequentFoldersAsync()
         {
             try
             {
@@ -246,16 +219,32 @@ namespace Wincent
         /// Retrieves all items in quick access
         /// </summary>
         /// <returns>List of quick access items</returns>
-        public static async Task<List<string>> GetQuickAccessItemsAsync()
+        public async Task<List<string>> GetQuickAccessItemsAsync()
         {
-            return await QuickAccessQuery.GetAllItemsAsync();
+            try
+            {
+                await EnsureInitializedAsync();
+                if (!_queryFeasible)
+                    throw new QuickAccessFeasibilityException("Quick access query functionality is not available");
+
+                return await _fileSystemService.GetQuickAccessItemsAsync();
+            }
+            catch (QuickAccessFeasibilityException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error getting quick access items: {ex.Message}");
+                return new List<string>();
+            }
         }
 
         /// <summary>
         /// Retrieves recent files list
         /// </summary>
         /// <returns>Recent files list</returns>
-        public static async Task<List<string>> GetRecentFilesAsync()
+        public async Task<List<string>> GetRecentFilesAsync()
         {
             return await QuickAccessQuery.GetRecentFilesAsync();
         }
@@ -264,27 +253,27 @@ namespace Wincent
         /// Retrieves frequent folders list
         /// </summary>
         /// <returns>Frequent folders list</returns>
-        public static async Task<List<string>> GetFrequentFoldersAsync()
+        public async Task<List<string>> GetFrequentFoldersAsync()
         {
             return await QuickAccessQuery.GetFrequentFoldersAsync();
         }
 
-        internal static void EmptyRecentFiles()
+        internal void EmptyRecentFiles()
         {
             try
             {
-                CoInitializeEx(IntPtr.Zero, COINIT_APARTMENTTHREADED);
-                SHAddToRecentDocs(SHARD_PATHW, IntPtr.Zero);
+                NativeMethods.CoInitializeEx(IntPtr.Zero, NativeMethods.COINIT_APARTMENTTHREADED);
+                NativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, IntPtr.Zero);
             }
             finally
             {
-                CoUninitialize();
+                NativeMethods.CoUninitialize();
             }
         }
 
-        internal static void EmptyFrequentFolders()
+        internal void EmptyFrequentFolders()
         {
-            var jumplistPath = GetKnownFolderPath(FOLDERID_Recent);
+            var jumplistPath = GetKnownFolderPath(NativeMethods.FOLDERID_Recent);
             var jumplistFile = Path.Combine(jumplistPath,
                 "AutomaticDestinations",
                 "f01b4d95cf55d32a.automaticDestinations-ms");
@@ -306,21 +295,21 @@ namespace Wincent
             }
         }
 
-        public static void EmptyQuickAccess()
+        public void EmptyQuickAccess()
         {
             EmptyRecentFiles();
             EmptyFrequentFolders();
         }
 
-        public static void ValidatePathSecurity(string path, QuickAccessItemType expectedType)
+        public void ValidatePathSecurity(string path, QuickAccessItemType expectedType)
         {
-            if (ProtectedPaths.Any(p => path.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0))
+            if (NativeMethods.ProtectedPaths.Any(p => path.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0))
                 throw new SecurityException("Protected system path.");
 
             ValidatePath(path, expectedType);
         }
 
-        private static void ValidatePath(string path, QuickAccessItemType expectedType)
+        private void ValidatePath(string path, QuickAccessItemType expectedType)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new ArgumentException("The path cannot be empty.");
@@ -335,12 +324,12 @@ namespace Wincent
                 throw new FileNotFoundException($"The path does not exist: {path}");
         }
 
-        private static string GetKnownFolderPath(Guid knownFolderId)
+        private string GetKnownFolderPath(Guid knownFolderId)
         {
             IntPtr pPath = IntPtr.Zero;
             try
             {
-                int hr = SHGetKnownFolderPath(knownFolderId, 0, IntPtr.Zero, out pPath);
+                int hr = NativeMethods.SHGetKnownFolderPath(knownFolderId, 0, IntPtr.Zero, out pPath);
                 if (hr != 0) throw new Win32Exception(hr);
 
                 return Marshal.PtrToStringUni(pPath);
@@ -348,7 +337,7 @@ namespace Wincent
             finally
             {
                 if (pPath != IntPtr.Zero)
-                    CoTaskMemFree(pPath);
+                    NativeMethods.CoTaskMemFree(pPath);
             }
         }
 
@@ -358,10 +347,14 @@ namespace Wincent
         /// <param name="path">Item path to add</param>
         /// <param name="itemType">Item type (File/Directory)</param>
         /// <returns>Whether the operation succeeded</returns>
-        public static async Task<bool> AddItemAsync(string path, QuickAccessItemType itemType)
+        public async Task<bool> AddItemAsync(string path, QuickAccessItemType itemType)
         {
             try
             {
+                await EnsureInitializedAsync();
+                if (!_pinUnpinFeasible)
+                    throw new QuickAccessFeasibilityException("Quick access pin/unpin functionality is not available");
+
                 _fileSystemService.ValidatePathSecurity(path, itemType);
 
                 if (itemType == QuickAccessItemType.File)
@@ -373,9 +366,9 @@ namespace Wincent
                     return await PinToFrequentFolderAsync(path);
                 }
             }
-            catch (Exception)
+            catch (QuickAccessFeasibilityException)
             {
-                return false;
+                throw;
             }
         }
 
@@ -385,10 +378,14 @@ namespace Wincent
         /// <param name="path">Item path to remove</param>
         /// <param name="itemType">Item type (File/Directory)</param>
         /// <returns>Whether the operation succeeded</returns>
-        public static async Task<bool> RemoveItemAsync(string path, QuickAccessItemType itemType)
+        public async Task<bool> RemoveItemAsync(string path, QuickAccessItemType itemType)
         {
             try
             {
+                await EnsureInitializedAsync();
+                if (!_pinUnpinFeasible)
+                    throw new QuickAccessFeasibilityException("Quick access pin/unpin functionality is not available");
+
                 _fileSystemService.ValidatePathSecurity(path, itemType);
 
                 if (itemType == QuickAccessItemType.File)
@@ -400,9 +397,9 @@ namespace Wincent
                     return await UnpinFromFrequentFolderAsync(path);
                 }
             }
-            catch (Exception)
+            catch (QuickAccessFeasibilityException)
             {
-                return false;
+                throw;
             }
         }
 
@@ -411,7 +408,7 @@ namespace Wincent
         /// </summary>
         /// <param name="itemType">Item type to clear (File/Directory)</param>
         /// <returns>Whether the operation succeeded</returns>
-        public static async Task<bool> EmptyItemsAsync(QuickAccessItemType itemType)
+        public async Task<bool> EmptyItemsAsync(QuickAccessItemType itemType)
         {
             try
             {
@@ -429,11 +426,150 @@ namespace Wincent
                 return false;
             }
         }
+
+        private static class NativeMethods
+        {
+            internal const uint SHARD_PATHW = 0x00000003;
+            internal const int COINIT_APARTMENTTHREADED = 0x2;
+            internal static readonly Guid FOLDERID_Recent = new Guid("{AE50C081-EBD2-438A-8655-8A092E34987A}");
+            internal static readonly string[] ProtectedPaths = { "System32", "Program Files" };
+
+            [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+            internal static extern void SHAddToRecentDocs(uint uFlags, IntPtr pv);
+
+            [DllImport("ole32.dll")]
+            internal static extern int CoInitializeEx(IntPtr reserved, uint dwCoInit);
+
+            [DllImport("ole32.dll")]
+            internal static extern void CoUninitialize();
+
+            [DllImport("shell32.dll")]
+            internal static extern int SHGetKnownFolderPath(
+                [MarshalAs(UnmanagedType.LPStruct)] Guid rfid,
+                uint dwFlags,
+                IntPtr hToken,
+                out IntPtr ppszPath);
+
+            [DllImport("ole32.dll")]
+            internal static extern void CoTaskMemFree(IntPtr ptr);
+        }
     }
 
     public class QuickAccessOperationException : Exception
     {
         public QuickAccessOperationException(string message) : base(message) { }
         public QuickAccessOperationException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    public class QuickAccessFeasibilityException : Exception
+    {
+        public QuickAccessFeasibilityException(string message) : base(message) { }
+        public QuickAccessFeasibilityException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    public interface IFileSystemService
+    {
+        bool FileExists(string path);
+        bool DirectoryExists(string path);
+        string GetFileExtension(string path);
+        Task<bool> ExecuteScriptAsync(PSScript scriptType, string parameter);
+        
+        void AddFileToRecentDocs(string path);
+        void EmptyRecentFiles();
+        void EmptyFrequentFolders();
+        void ValidatePathSecurity(string path, QuickAccessItemType itemType);
+        
+        bool CheckScriptFeasible();
+        void FixExecutionPolicy();
+        Task<bool> CheckQueryFeasibleAsync();
+        Task<bool> CheckPinUnpinFeasibleAsync();
+        Task<List<string>> GetQuickAccessItemsAsync();
+        Task<List<string>> GetRecentFilesAsync();
+        Task<List<string>> GetFrequentFoldersAsync();
+    }
+
+    public class DefaultFileSystemService : IFileSystemService
+    {
+        private readonly QuickAccessManager _manager;
+
+        public DefaultFileSystemService()
+        {
+            _manager = new QuickAccessManager();
+        }
+
+        public void AddFileToRecentDocs(string path)
+        {
+            _manager.AddFileToRecentDocs(path);
+        }
+
+        public void EmptyRecentFiles()
+        {
+            _manager.EmptyRecentFiles();
+        }
+
+        public void EmptyFrequentFolders()
+        {
+            _manager.EmptyFrequentFolders();
+        }
+
+        public void ValidatePathSecurity(string path, QuickAccessItemType itemType)
+        {
+            _manager.ValidatePathSecurity(path, itemType);
+        }
+
+        public bool CheckScriptFeasible()
+        {
+            return ExecutionFeasible.CheckScriptFeasible();
+        }
+
+        public void FixExecutionPolicy()
+        {
+            ExecutionFeasible.FixExecutionPolicy();
+        }
+
+        public async Task<bool> CheckQueryFeasibleAsync()
+        {
+            return await ExecutionFeasible.CheckQueryFeasible();
+        }
+
+        public async Task<bool> CheckPinUnpinFeasibleAsync()
+        {
+            return await ExecutionFeasible.CheckPinUnpinFeasible();
+        }
+
+        public bool FileExists(string path)
+        {
+            throw new NotImplementedException();
+        }
+
+        public bool DirectoryExists(string path)
+        {
+            throw new NotImplementedException();
+        }
+
+        public string GetFileExtension(string path)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<bool> ExecuteScriptAsync(PSScript scriptType, string parameter)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<List<string>> GetQuickAccessItemsAsync()
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<List<string>> GetRecentFilesAsync()
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<List<string>> GetFrequentFoldersAsync()
+        {
+            throw new NotImplementedException();
+        }
     }
 }
