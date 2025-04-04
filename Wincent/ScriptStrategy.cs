@@ -82,9 +82,27 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $shell = New-Object -ComObject Shell.Application
-            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
-                ForEach-Object {{ $_.Path }}
+            $timeout = 5
+
+            $scriptBlock = {{
+                $shell = New-Object -ComObject Shell.Application
+                $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | ForEach-Object {{ $_.Path }};
+            }}.ToString()
+
+            $arguments = '-Command & {{ $scriptBlock }}'
+            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
+
+            if (-not $process.WaitForExit($timeout * 1000)) {{
+                try {{
+                    $process.Kill()
+                    Write-Error 'Process execution timed out ($timeout s), forcefully terminated'
+                    exit 1
+                }}
+                catch {{
+                    Write-Error 'Error occurred while terminating process: $_'
+                    exit 1
+                }}
+            }}
         ";
     }
 
@@ -92,12 +110,31 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $shell = New-Object -ComObject Shell.Application
-            $shell.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
+            $timeout = 10
 
-            $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-            $target = $folders | where {{ $_.Path -eq $PSScriptRoot }};
-            $target.InvokeVerb('unpinfromhome');
+            $scriptBlock = {{
+                $shell = New-Object -ComObject Shell.Application
+                $shell.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
+
+                $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                $target = $folders | where {{ $_.Path -eq $PSScriptRoot }};
+                $target.InvokeVerb('unpinfromhome');
+            }}.ToString()
+
+            $arguments = '-Command & {{ $scriptBlock }}'
+            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
+
+            if (-not $process.WaitForExit($timeout * 1000)) {{
+                try {{
+                    $process.Kill()
+                    Write-Error 'Process execution timed out ($timeout s), forcefully terminated'
+                    exit 1
+                }}
+                catch {{
+                    Write-Error 'Error occurred while terminating process: $_'
+                    exit 1
+                }}
+            }}
         ";
     }
 
