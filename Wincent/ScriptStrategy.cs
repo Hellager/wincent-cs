@@ -9,6 +9,7 @@ namespace Wincent
         QueryQuickAccess,
         QueryRecentFile,
         QueryFrequentFolder,
+        AddRecentFile,
         RemoveRecentFile,
         PinToFrequentFolder,
         UnpinFromFrequentFolder,
@@ -142,6 +143,21 @@ namespace Wincent
         ";
     }
 
+    public class AddRecentFileStrategy : PSScriptStrategyBase
+    {
+        public override string GenerateScript(string parameter)
+        {
+            if (string.IsNullOrWhiteSpace(parameter))
+                throw new ArgumentException("Valid file path parameter required");
+
+            return $@"
+                {EncodingSetup}
+                {ShellApplicationSetup}
+                Write-Output '{parameter}'
+            ";
+        }
+    }
+
     public class RemoveRecentFileStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter)
@@ -219,6 +235,7 @@ namespace Wincent
                 [PSScript.QueryQuickAccess] = () => new QueryQuickAccessStrategy(),
                 [PSScript.CheckQueryFeasible] = () => new CheckQueryFeasibleStrategy(),
                 [PSScript.CheckPinUnpinFeasible] = () => new CheckPinUnpinFeasibleStrategy(),
+                [PSScript.AddRecentFile] = () => new AddRecentFileStrategy(),
                 [PSScript.RemoveRecentFile] = () => new RemoveRecentFileStrategy(),
                 [PSScript.PinToFrequentFolder] = () => new PinToFrequentFolderStrategy(),
                 [PSScript.UnpinFromFrequentFolder] = () => new UnpinFromFrequentFolderStrategy(),
