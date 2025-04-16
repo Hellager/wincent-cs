@@ -46,6 +46,38 @@ namespace Wincent
         }
 
         /// <summary>
+        /// Adds UTF-8 BOM to the beginning of a byte array if not already present
+        /// </summary>
+        /// <param name="content">Content bytes</param>
+        /// <returns>Content with UTF-8 BOM</returns>
+        public static byte[] AddUtf8Bom(byte[] content)
+        {
+            byte[] bom = Encoding.UTF8.GetPreamble();
+
+            if (content.Length >= bom.Length)
+            {
+                bool hasBom = true;
+                for (int i = 0; i < bom.Length; i++)
+                {
+                    if (content[i] != bom[i])
+                    {
+                        hasBom = false;
+                        break;
+                    }
+                }
+
+                if (hasBom)
+                    return content;
+            }
+
+            byte[] result = new byte[bom.Length + content.Length];
+            Buffer.BlockCopy(bom, 0, result, 0, bom.Length);
+            Buffer.BlockCopy(content, 0, result, bom.Length, content.Length);
+
+            return result;
+        }
+
+        /// <summary>
         /// Gets the current version from assembly version (major.minor.build)
         /// </summary>
         private static string GetCurrentVersion()
@@ -139,7 +171,7 @@ namespace Wincent
 
                 // Convert to UTF8 with BOM
                 byte[] scriptBytes = Encoding.UTF8.GetBytes(scriptContent);
-                byte[] contentWithBom = ScriptExecutor.AddUtf8Bom(scriptBytes);
+                byte[] contentWithBom = AddUtf8Bom(scriptBytes);
 
                 // Write to file
                 File.WriteAllBytes(scriptPath, contentWithBom);

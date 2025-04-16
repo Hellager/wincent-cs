@@ -148,33 +148,6 @@ namespace Wincent
             _fileSystemService = new DefaultFileSystemService();
         }
 
-        public static byte[] AddUtf8Bom(byte[] content)
-        {
-            byte[] bom = Encoding.UTF8.GetPreamble();
-
-            if (content.Length >= bom.Length)
-            {
-                bool hasBom = true;
-                for (int i = 0; i < bom.Length; i++)
-                {
-                    if (content[i] != bom[i])
-                    {
-                        hasBom = false;
-                        break;
-                    }
-                }
-
-                if (hasBom)
-                    return content;
-            }
-
-            byte[] result = new byte[bom.Length + content.Length];
-            Buffer.BlockCopy(bom, 0, result, 0, bom.Length);
-            Buffer.BlockCopy(content, 0, result, bom.Length, content.Length);
-
-            return result;
-        }
-
         private async Task<ScriptResult> ExecuteCoreAsync(string scriptPath, TimeSpan? timeout = null)
         {
             if (!File.Exists(scriptPath))
