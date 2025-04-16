@@ -201,9 +201,17 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
-                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
-                $target.InvokeVerb('unpinfromhome');
+                $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match ""Windows 11""
+                if ($isWin11)
+                {{
+                    $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome')
+                }}
+                else
+                {{
+                    $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                    $target = $folders | where {{ $_.Path -eq '{parameter}' }};
+                    $target.InvokeVerb('unpinfromhome');
+                }}
             ";
         }
     }   
