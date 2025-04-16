@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace Wincent
 {
@@ -39,6 +40,9 @@ namespace Wincent
             Directory.CreateDirectory(ScriptRoot);
             Directory.CreateDirectory(StaticScriptDir);
             Directory.CreateDirectory(DynamicScriptDir);
+
+            CleanupStaticScriptsByVersion();
+            CleanupDynamicScripts();
         }
 
         /// <summary>
@@ -83,7 +87,8 @@ namespace Wincent
             {
                 PSScript.RemoveRecentFile,
                 PSScript.PinToFrequentFolder,
-                PSScript.UnpinFromFrequentFolder
+                PSScript.UnpinFromFrequentFolder,
+                PSScript.AddRecentFile,
             };
             return parameterized.Contains(script);
         }
@@ -153,31 +158,29 @@ namespace Wincent
         {
             try
             {
+                CleanupByAge(maxAgeHours);
+                CleanupByVersion();
+            }
+            catch
+            {
+                // Ignore cleanup errors
+            }
+        }
+
+        /// <summary>
+        /// Cleans up scripts based on last modified time
+        /// </summary>
+        /// <param name="maxAgeHours">Maximum retention time in hours</param>
+        private static void CleanupByAge(int maxAgeHours)
+        {
+            try
+            {
                 var directory = new DirectoryInfo(DynamicScriptDir);
                 var cutoffTime = DateTime.Now.AddHours(-maxAgeHours);
 
                 foreach (var file in directory.GetFiles("*.ps1"))
                 {
-                    bool shouldDelete = false;
-                    
-                    // Check if file is expired
                     if (file.LastWriteTime < cutoffTime)
-                    {
-                        shouldDelete = true;
-                    }
-                    
-                    // Check if version is different
-                    if (!shouldDelete)
-                    {
-                        var fileName = file.Name;
-                        var versionPart = fileName.Split('_').ElementAtOrDefault(1);
-                        if (versionPart != null && versionPart != CurrentVersion)
-                        {
-                            shouldDelete = true;
-                        }
-                    }
-
-                    if (shouldDelete)
                     {
                         try
                         {
@@ -189,22 +192,97 @@ namespace Wincent
                         }
                     }
                 }
+            }
+            catch
+            {
+                // Ignore cleanup errors
+            }
+        }
 
-                // Also clean static scripts with different versions
-                directory = new DirectoryInfo(StaticScriptDir);
+        /// <summary>
+        /// Cleans up scripts with versions that don't match current version
+        /// </summary>
+        private static void CleanupByVersion()
+        {
+            try
+            {
+                var directory = new DirectoryInfo(DynamicScriptDir);
+                // Match version numbers in script filenames
+                var versionPattern = new Regex(@"^([A-Za-z]+)_v(\d+\.\d+\.\d+)_([0-9A-F]{8})\.ps1$");
                 foreach (var file in directory.GetFiles("*.ps1"))
                 {
-                    var fileName = file.Name;
-                    var versionPart = fileName.Split('_').ElementAtOrDefault(1);
-                    if (versionPart != null && versionPart != CurrentVersion)
+                    var match = versionPattern.Match(file.Name);
+                    if (match.Success)
                     {
-                        try
+                        string scriptName = match.Groups[1].Value;
+                        string fileVersion = match.Groups[2].Value;
+                        string paramHash = match.Groups[3].Value;
+                        // Delete the file if version doesn't match current version
+                        if (fileVersion != CurrentVersion.Substring(1)) // Remove leading 'v' from version
                         {
-                            file.Delete();
+                            try
+                            {
+                                file.Delete();
+                                // Recreate if valid PSScript enum and parameterized
+                                if (Enum.TryParse<PSScript>(scriptName, out var scriptType) &&
+                                    IsParameterizedScript(scriptType))
+                                {
+                                    // Note: Cannot recreate from hash, files will be recreated on demand
+                                }
+                            }
+                            catch
+                            {
+                                // Ignore deletion failures
+                            }
                         }
-                        catch
+                    }
+                }
+                CleanupStaticScriptsByVersion();
+            }
+            catch
+            {
+                // Ignore cleanup errors
+            }
+        }
+
+        /// <summary>
+        /// Cleans up static scripts with versions that don't match current version
+        /// </summary>
+        private static void CleanupStaticScriptsByVersion()
+        {
+            try
+            {
+                var directory = new DirectoryInfo(StaticScriptDir);
+                // Match version numbers in static script filenames
+                var versionPattern = new Regex(@"^([A-Za-z]+)_v(\d+\.\d+\.\d+)\.ps1$");
+                foreach (var file in directory.GetFiles("*.ps1"))
+                {
+                    var match = versionPattern.Match(file.Name);
+                    if (match.Success)
+                    {
+                        string scriptName = match.Groups[1].Value;
+                        string fileVersion = match.Groups[2].Value;
+                        // Delete the file if version doesn't match current version
+                        if (fileVersion != CurrentVersion.Substring(1)) // Remove leading 'v' from version
                         {
-                            // Ignore deletion failures
+                            try
+                            {
+                                file.Delete();
+                                // Recreate if valid PSScript enum and static
+                                if (Enum.TryParse<PSScript>(scriptName, out var scriptType) &&
+                                    !IsParameterizedScript(scriptType))
+                                {
+                                    var newFilePath = Path.Combine(StaticScriptDir, $"{scriptType}_{CurrentVersion}.ps1");
+                                    if (!File.Exists(newFilePath))
+                                    {
+                                        CreateScriptFile(newFilePath, scriptType, null);
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // Ignore deletion failures
+                            }
                         }
                     }
                 }
