@@ -28,6 +28,10 @@ namespace Wincent
             $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
         ";
 
+        protected const string ShellApplicationSetup = @"
+            $shellApplication = New-Object -ComObject Shell.Application;
+        ";
+
         public abstract string GenerateScript(string parameter);
     }
 
@@ -41,7 +45,7 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $shellApplication = New-Object -ComObject Shell.Application;
+            {ShellApplicationSetup}
             $windows = $shellApplication.Windows();
             $windows | ForEach-Object {{ $_.Refresh() }}
         ";
@@ -51,8 +55,8 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $shell = New-Object -ComObject Shell.Application;
-            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
+            {ShellApplicationSetup}
+            $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
                 where {{ $_.IsFolder -eq $false }} | 
                 ForEach-Object {{ $_.Path }}
         ";
@@ -62,8 +66,8 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $shell = New-Object -ComObject Shell.Application;
-            $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items() | 
+            {ShellApplicationSetup}
+            $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items() | 
                 ForEach-Object {{ $_.Path }}
         ";
     }
@@ -72,8 +76,8 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $shell = New-Object -ComObject Shell.Application;
-            $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
+            {ShellApplicationSetup}
+            $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
                 ForEach-Object {{ $_.Path }}
         ";
     }
@@ -85,8 +89,8 @@ namespace Wincent
             $timeout = 5
 
             $scriptBlock = {{
-                $shell = New-Object -ComObject Shell.Application
-                $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | ForEach-Object {{ $_.Path }};
+                {ShellApplicationSetup}
+                $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | ForEach-Object {{ $_.Path }};
             }}.ToString()
 
             $arguments = '-Command & {{ $scriptBlock }}'
@@ -113,10 +117,10 @@ namespace Wincent
             $timeout = 10
 
             $scriptBlock = {{
-                $shell = New-Object -ComObject Shell.Application
-                $shell.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
+                {ShellApplicationSetup}
+                $shellApplication.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
 
-                $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
                 $target = $folders | where {{ $_.Path -eq $PSScriptRoot }};
                 $target.InvokeVerb('unpinfromhome');
             }}.ToString()
@@ -147,8 +151,8 @@ namespace Wincent
 
             return $@"
                 {EncodingSetup}
-                $shell = New-Object -ComObject Shell.Application;
-                $files = $shell.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
+                {ShellApplicationSetup}
+                $files = $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
                          where {{ $_.IsFolder -eq $false }};
                 $target = $files | where {{ $_.Path -eq '{parameter}' }};
                 $target.InvokeVerb('remove');
@@ -165,8 +169,8 @@ namespace Wincent
 
             return $@"
                 {EncodingSetup}
-                $shell = New-Object -ComObject Shell.Application;
-                $shell.Namespace('{parameter}').Self.InvokeVerb('pintohome');
+                {ShellApplicationSetup}
+                $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome');
             ";
         }
     }
@@ -180,8 +184,8 @@ namespace Wincent
 
             return $@"
                 {EncodingSetup}
-                $shell = New-Object -ComObject Shell.Application;
-                $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                {ShellApplicationSetup}
+                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
                 $target = $folders | where {{ $_.Path -eq '{parameter}' }};
                 $target.InvokeVerb('unpinfromhome');
             ";
@@ -192,8 +196,8 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $shell = New-Object -ComObject Shell.Application;
-            $folders = $shell.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+            {ShellApplicationSetup}
+            $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
             $folders | ForEach-Object {{ $_.InvokeVerb('unpinfromhome') }}
         ";
     }
