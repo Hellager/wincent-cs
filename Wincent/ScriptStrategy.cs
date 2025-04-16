@@ -33,6 +33,59 @@ namespace Wincent
             $shellApplication = New-Object -ComObject Shell.Application;
         ";
 
+        protected static string CreateTimeoutWrapper(string scriptBlock, int timeoutSeconds = 5)
+        {
+            return $@"
+            $timeout = {timeoutSeconds}
+
+            $scriptBlock = {{
+                {scriptBlock}
+            }}.ToString()
+
+            $arguments = ""-Command & {{$scriptBlock}}""
+            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
+
+            if (-not $process.WaitForExit($timeout * 1000)) {{
+                try {{
+                    $process.Kill()
+                    Write-Error ""Process execution timed out (${{timeout}}s), forcefully terminated""
+                    exit 1
+                }}
+                catch {{
+                    Write-Error ""Error occurred while terminating process: $_""
+                    exit 1
+                }}
+            }}
+            ";
+        }
+
+        protected static string CreateTimeoutWrapperWithParam(string scriptBlock, string paramName, string paramValue, int timeoutSeconds = 5)
+        {
+            return $@"
+            $timeout = {timeoutSeconds}
+
+            $scriptBlock = {{
+                param(${paramName})
+                {scriptBlock}
+            }}.ToString()
+
+            $arguments = ""-Command & {{$scriptBlock}} -{paramName} '{paramValue}'""
+            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
+
+            if (-not $process.WaitForExit($timeout * 1000)) {{
+                try {{
+                    $process.Kill()
+                    Write-Error ""Process execution timed out (${{timeout}}s), forcefully terminated""
+                    exit 1
+                }}
+                catch {{
+                    Write-Error ""Error occurred while terminating process: $_""
+                    exit 1
+                }}
+            }}
+            ";
+        }
+
         public abstract string GenerateScript(string parameter);
     }
 
@@ -87,27 +140,11 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $timeout = 5
-
-            $scriptBlock = {{
+            {CreateTimeoutWrapper($@"
                 {ShellApplicationSetup}
-                $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | ForEach-Object {{ $_.Path }};
-            }}.ToString()
-
-            $arguments = '-Command & {{ $scriptBlock }}'
-            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
-
-            if (-not $process.WaitForExit($timeout * 1000)) {{
-                try {{
-                    $process.Kill()
-                    Write-Error 'Process execution timed out ($timeout s), forcefully terminated'
-                    exit 1
-                }}
-                catch {{
-                    Write-Error 'Error occurred while terminating process: $_'
-                    exit 1
-                }}
-            }}
+                $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
+                    ForEach-Object {{ $_.Path }}
+            ")}
         ";
     }
 
@@ -115,31 +152,25 @@ namespace Wincent
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
-            $timeout = 10
-
-            $scriptBlock = {{
+            $currentPath = $PSScriptRoot
+            {CreateTimeoutWrapperWithParam($@"
                 {ShellApplicationSetup}
-                $shellApplication.Namespace($PSScriptRoot).Self.InvokeVerb('pintohome')
+                $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')
 
-                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                $target = $folders | where {{ $_.Path -eq $PSScriptRoot }};
-                $target.InvokeVerb('unpinfromhome');
-            }}.ToString()
+                Start-Sleep -Seconds 3
 
-            $arguments = '-Command & {{ $scriptBlock }}'
-            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
-
-            if (-not $process.WaitForExit($timeout * 1000)) {{
-                try {{
-                    $process.Kill()
-                    Write-Error 'Process execution timed out ($timeout s), forcefully terminated'
-                    exit 1
+                $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match ""Windows 11""
+                if ($isWin11) 
+                {{
+                    $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')
                 }}
-                catch {{
-                    Write-Error 'Error occurred while terminating process: $_'
-                    exit 1
+                else
+                {{
+                    $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                    $target = $folders | Where-Object {{$_.Path -eq $scriptPath}};
+                    $target.InvokeVerb('unpinfromhome');
                 }}
-            }}
+            ", "scriptPath", "$currentPath", 10)}
         ";
     }
 
