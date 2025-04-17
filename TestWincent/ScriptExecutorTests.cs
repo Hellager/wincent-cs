@@ -24,7 +24,7 @@ namespace TestWincent
             byte[] content = Encoding.UTF8.GetBytes("Test content");
 
             // Act
-            byte[] withBom = ScriptExecutor.AddUtf8Bom(content);
+            byte[] withBom = ScriptStorage.AddUtf8Bom(content);
 
             // Assert
             Assert.AreEqual(content.Length + 3, withBom.Length, "BOM should add 3 bytes");
@@ -50,7 +50,7 @@ namespace TestWincent
             Buffer.BlockCopy(content, 0, contentWithBom, bomBytes.Length, content.Length);
 
             // Act
-            byte[] result = ScriptExecutor.AddUtf8Bom(contentWithBom);
+            byte[] result = ScriptStorage.AddUtf8Bom(contentWithBom);
 
             // Assert
             Assert.AreEqual(contentWithBom.Length, result.Length, "Length should not change if BOM already exists");

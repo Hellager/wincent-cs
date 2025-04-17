@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Collections.Generic;
 
 namespace Wincent
@@ -32,6 +33,14 @@ namespace Wincent
         protected const string ShellApplicationSetup = @"
             $shellApplication = New-Object -ComObject Shell.Application;
         ";
+
+        protected static string EscapePowerShellString(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            return input.Replace("'", "''");
+        }
 
         protected static string CreateTimeoutWrapper(string scriptBlock, int timeoutSeconds = 5)
         {
@@ -69,7 +78,7 @@ namespace Wincent
                 {scriptBlock}
             }}.ToString()
 
-            $arguments = ""-Command & {{$scriptBlock}} -{paramName} '{paramValue}'""
+            $arguments = ""-Command & {{$scriptBlock}} -{paramName} '{EscapePowerShellString(paramValue)}'""
             $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
 
             if (-not $process.WaitForExit($timeout * 1000)) {{
@@ -181,6 +190,8 @@ namespace Wincent
             if (string.IsNullOrWhiteSpace(parameter))
                 throw new ArgumentException("Valid file path parameter required");
 
+            parameter = EscapePowerShellString(parameter);
+
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
@@ -195,6 +206,8 @@ namespace Wincent
         {
             if (string.IsNullOrWhiteSpace(parameter))
                 throw new ArgumentException("Valid file path parameter required");
+
+            parameter = EscapePowerShellString(parameter);
 
             return $@"
                 {EncodingSetup}
@@ -214,6 +227,8 @@ namespace Wincent
             if (string.IsNullOrWhiteSpace(parameter))
                 throw new ArgumentException("Valid file path parameter required");
 
+            parameter = EscapePowerShellString(parameter);
+
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
@@ -228,6 +243,8 @@ namespace Wincent
         {
             if (string.IsNullOrWhiteSpace(parameter))
                 throw new ArgumentException("Valid file path parameter required");
+
+            parameter = EscapePowerShellString(parameter);
 
             return $@"
                 {EncodingSetup}
