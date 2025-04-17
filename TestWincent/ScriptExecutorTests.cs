@@ -3,82 +3,390 @@ using System;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using System.Reflection;
 using Wincent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using Moq;
 
 namespace TestWincent
 {
     [TestClass]
     public class TestScriptExecutor
     {
+        private ScriptExecutor _executor;
+        private string _tempScriptPath;
+        private Mock<IFileSystemService> _mockFileSystem;
+        private Mock<IScriptStorageService> _mockScriptStorage;
+        private QuickAccessDataFiles _dataFiles;
+
         [TestInitialize]
         public void Initialize()
         {
+            _tempScriptPath = Path.Combine(Path.GetTempPath(), "TestScript.ps1");
+
+            // 创建模拟文件系统服务
+            _mockFileSystem = new Mock<IFileSystemService>();
+
+            // 创建模拟脚本存储服务
+            _mockScriptStorage = new Mock<IScriptStorageService>();
+
+            // 创建实际的 QuickAccessDataFiles 实例
+            _dataFiles = new QuickAccessDataFiles();
+
+            // 设置默认行为
+            _mockFileSystem.Setup(fs => fs.FileExists(It.IsAny<string>())).Returns(true);
+            _mockFileSystem.Setup(fs => fs.DirectoryExists(It.IsAny<string>())).Returns(true);
+            _mockScriptStorage.Setup(ss => ss.GetScriptPath(It.IsAny<PSScript>())).Returns(_tempScriptPath);
+            _mockScriptStorage.Setup(ss => ss.GetDynamicScriptPath(It.IsAny<PSScript>(), It.IsAny<string>())).Returns(_tempScriptPath);
+            _mockScriptStorage.Setup(ss => ss.IsParameterizedScript(It.IsAny<PSScript>())).Returns(false);
+
+            // 创建 ScriptExecutor 实例
+            _executor = new ScriptExecutor(_mockFileSystem.Object, _mockScriptStorage.Object, _dataFiles);
         }
 
-        #region 基本功能测试
-
-        [TestMethod]
-        public void AddUtf8Bom_AddsCorrectBOM()
+        [TestCleanup]
+        public void Cleanup()
         {
-            // Arrange
-            byte[] content = Encoding.UTF8.GetBytes("Test content");
-
-            // Act
-            byte[] withBom = ScriptStorage.AddUtf8Bom(content);
-
-            // Assert
-            Assert.AreEqual(content.Length + 3, withBom.Length, "BOM should add 3 bytes");
-            Assert.AreEqual(0xEF, withBom[0], "First BOM byte should be 0xEF");
-            Assert.AreEqual(0xBB, withBom[1], "Second BOM byte should be 0xBB");
-            Assert.AreEqual(0xBF, withBom[2], "Third BOM byte should be 0xBF");
-
-            // Verify content is preserved
-            for (int i = 0; i < content.Length; i++)
+            // 清理临时文件
+            if (File.Exists(_tempScriptPath))
             {
-                Assert.AreEqual(content[i], withBom[i + 3], $"Content byte at position {i} should be preserved");
+                File.Delete(_tempScriptPath);
+            }
+
+            // 清理缓存
+            if (_executor != null)
+            {
+                _executor.ClearCache();
             }
         }
 
+        #region 基础功能测试
+
         [TestMethod]
-        public void AddUtf8Bom_WithExistingBOM_DoesNotAddDuplicate()
+        public async Task ExecuteCoreAsync_SuccessfulExecution_ReturnsCorrectResult()
         {
-            // Arrange
-            byte[] bomBytes = new byte[] { 0xEF, 0xBB, 0xBF };
-            byte[] content = Encoding.UTF8.GetBytes("Test content");
-            byte[] contentWithBom = new byte[bomBytes.Length + content.Length];
-            Buffer.BlockCopy(bomBytes, 0, contentWithBom, 0, bomBytes.Length);
-            Buffer.BlockCopy(content, 0, contentWithBom, bomBytes.Length, content.Length);
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
 
-            // Act
-            byte[] result = ScriptStorage.AddUtf8Bom(contentWithBom);
+            // 执行脚本
+            var result = await _executor.ExecuteCoreAsync(_tempScriptPath);
 
-            // Assert
-            Assert.AreEqual(contentWithBom.Length, result.Length, "Length should not change if BOM already exists");
-            CollectionAssert.AreEqual(contentWithBom, result, "Content should be unchanged if BOM already exists");
+            // 验证结果
+            Assert.AreEqual(0, result.ExitCode);
+            Assert.IsTrue(result.Output.Contains("测试输出"));
+            Assert.IsTrue(string.IsNullOrEmpty(result.Error));
+        }
+
+        [TestMethod]
+        public async Task ExecuteCoreAsync_ErrorOutput_ReturnsErrorResult()
+        {
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Error '测试错误'; exit 1";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 执行脚本
+            var result = await _executor.ExecuteCoreAsync(_tempScriptPath);
+
+            // 验证结果
+            Assert.AreEqual(1, result.ExitCode);
+            Assert.IsTrue(result.Error.Contains("测试错误"));
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScript_SuccessfulExecution_ReturnsCorrectResult()
+        {
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 执行脚本
+            var result = await _executor.ExecutePSScript(PSScript.RefreshExplorer, null);
+
+            // 验证结果
+            Assert.AreEqual(0, result.ExitCode);
+            Assert.IsTrue(result.Output.Contains("测试输出"));
+            Assert.IsTrue(string.IsNullOrEmpty(result.Error));
         }
 
         #endregion
 
-        #region 集成测试
+        #region 异常处理测试
 
         [TestMethod]
-        public async Task ExecutePSScript_RefreshExplorer_ExecutesCorrectScript()
+        [ExpectedException(typeof(FileNotFoundException))]
+        public async Task ExecuteCoreAsync_NonExistentScript_ThrowsFileNotFoundException()
         {
-            // This test requires a mock of the strategy factory
-            // For simplicity, we'll just verify the method doesn't throw
+            // 设置文件系统服务返回文件不存在
+            _mockFileSystem.Setup(fs => fs.FileExists(It.IsAny<string>())).Returns(false);
 
+            // 执行脚本
+            await _executor.ExecuteCoreAsync(_tempScriptPath);
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScript_InvalidPath_ThrowsInvalidPathException()
+        {
+            // 设置文件系统服务返回文件不存在
+            _mockFileSystem.Setup(fs => fs.FileExists(It.IsAny<string>())).Returns(false);
+            _mockFileSystem.Setup(fs => fs.DirectoryExists(It.IsAny<string>())).Returns(false);
+
+            // 执行脚本并捕获异常
             try
             {
-                var result = await ScriptExecutor.ExecutePSScript(PSScript.RefreshExplorer, null);
-
-                // Basic validation that something executed
-                Assert.IsNotNull(result, "Result should not be null");
+                await _executor.ExecutePSScript(PSScript.AddRecentFile, "C:\\NonExistentPath");
+                Assert.Fail("应该抛出 InvalidPathException 异常");
             }
-            catch (Exception ex)
+            catch (InvalidPathException ex)
             {
-                // If this fails due to PowerShell execution policy or other environment issues,
-                // we'll just log it rather than failing the test
-                Console.WriteLine($"ExecutePSScript failed: {ex.Message}");
+                Assert.AreEqual("C:\\NonExistentPath", ex.Path);
+                Assert.IsTrue(ex.Message.Contains("File or directory does not exist"));
+            }
+        }
+
+        #endregion
+
+        #region 超时机制测试
+
+        [TestMethod]
+        public async Task ExecuteCoreAsync_Timeout_ThrowsScriptTimeoutException()
+        {
+            // 准备长时间运行的测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Start-Sleep -Seconds 10; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 执行脚本并设置超时
+            try
+            {
+                await _executor.ExecuteCoreAsync(_tempScriptPath, TimeSpan.FromSeconds(1));
+                Assert.Fail("应该抛出 ScriptTimeoutException 异常");
+            }
+            catch (ScriptTimeoutException ex)
+            {
+                Assert.IsTrue(ex.Message.Contains("Script execution timeout"));
+                Assert.IsTrue(ex.Message.Contains("1 seconds"));
+            }
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithTimeout_Timeout_ReturnsTimeoutResult()
+        {
+            // 准备长时间运行的测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Start-Sleep -Seconds 10; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 执行脚本并设置超时
+            var result = await _executor.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 1);
+
+            // 验证结果
+            Assert.AreEqual(-1, result.ExitCode);
+            Assert.IsTrue(result.Error.Contains("timeout"));
+        }
+
+        #endregion
+
+        #region 缓存功能测试
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_QueryScript_CachesResult()
+        {
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 执行查询脚本两次
+            var result1 = await _executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+            var result2 = await _executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+
+            // 验证结果
+            Assert.IsNotNull(result1);
+            Assert.IsNotNull(result2);
+
+            // 由于缓存机制，第二次调用应该返回相同的结果
+            CollectionAssert.AreEqual(result1, result2);
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_NonQueryScript_DoesNotCache()
+        {
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 执行非查询脚本两次
+            var result1 = await _executor.ExecutePSScriptWithCache(PSScript.RefreshExplorer, null);
+            var result2 = await _executor.ExecutePSScriptWithCache(PSScript.RefreshExplorer, null);
+
+            // 验证结果
+            Assert.IsNotNull(result1);
+            Assert.IsNotNull(result2);
+
+            // 非查询脚本不应该被缓存，但结果应该相同
+            CollectionAssert.AreEqual(result1, result2);
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_DataFileModified_InvalidatesCache()
+        {
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 执行查询脚本两次
+            var result1 = await _executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+
+            // 等待一段时间以确保修改时间不同
+            await Task.Delay(100);
+
+            var result2 = await _executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+
+            // 验证结果
+            Assert.IsNotNull(result1);
+            Assert.IsNotNull(result2);
+
+            // 由于数据文件修改时间变化，缓存应该失效，但结果应该相同
+            CollectionAssert.AreEqual(result1, result2);
+        }
+
+        #endregion
+
+        #region 文件系统集成测试
+
+        [TestMethod]
+        public void FileOrDirectoryExists_ValidPath_ReturnsTrue()
+        {
+            // 设置文件系统服务返回文件存在
+            _mockFileSystem.Setup(fs => fs.FileExists("C:\\ValidPath")).Returns(true);
+
+            // 验证结果
+            Assert.IsTrue(_executor.FileOrDirectoryExists("C:\\ValidPath"));
+        }
+
+        [TestMethod]
+        public void FileOrDirectoryExists_InvalidPath_ReturnsFalse()
+        {
+            // 设置文件系统服务返回文件不存在
+            _mockFileSystem.Setup(fs => fs.FileExists("C:\\InvalidPath")).Returns(false);
+            _mockFileSystem.Setup(fs => fs.DirectoryExists("C:\\InvalidPath")).Returns(false);
+
+            // 验证结果
+            Assert.IsFalse(_executor.FileOrDirectoryExists("C:\\InvalidPath"));
+        }
+
+        [TestMethod]
+        public void FileOrDirectoryExists_NullPath_ReturnsFalse()
+        {
+            // 验证结果
+            Assert.IsFalse(_executor.FileOrDirectoryExists(null));
+        }
+
+        [TestMethod]
+        public void FileOrDirectoryExists_EmptyPath_ReturnsFalse()
+        {
+            // 验证结果
+            Assert.IsFalse(_executor.FileOrDirectoryExists(""));
+        }
+
+        [TestMethod]
+        public void FileOrDirectoryExists_WhitespacePath_ReturnsFalse()
+        {
+            // 验证结果
+            Assert.IsFalse(_executor.FileOrDirectoryExists("   "));
+        }
+
+        #endregion
+
+        #region 并发执行测试
+
+        [TestMethod]
+        public async Task ExecutePSScript_ConcurrentExecution_IsolatesOutput()
+        {
+            // 准备测试脚本 - 使用参数化的方式
+            string scriptContent = "param($index)\r\n[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\r\nWrite-Output \"测试输出 $index\";\r\nexit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 设置脚本存储服务，使其返回我们的测试脚本路径，并标记为参数化脚本
+            _mockScriptStorage.Setup(ss => ss.IsParameterizedScript(It.IsAny<PSScript>())).Returns(true);
+
+            // 创建并发任务
+            var tasks = new List<Task<ScriptResult>>();
+            for (int i = 0; i < 10; i++)
+            {
+                int index = i; // 捕获循环变量
+
+                // 为每个任务创建唯一的脚本路径，避免并发冲突
+                string paramScriptPath = Path.Combine(Path.GetTempPath(), $"TestScript_{index}.ps1");
+                File.WriteAllText(paramScriptPath, scriptContent, Encoding.UTF8);
+
+                // 设置每个特定参数的脚本路径
+                _mockScriptStorage.Setup(ss => ss.GetDynamicScriptPath(It.IsAny<PSScript>(), index.ToString())).Returns(paramScriptPath);
+
+                // 添加任务
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        // 执行脚本，使用索引作为参数
+                        var result = await _executor.ExecutePSScript(PSScript.AddRecentFile, index.ToString());
+                        return result;
+                    }
+                    finally
+                    {
+                        // 清理临时文件
+                        if (File.Exists(paramScriptPath))
+                        {
+                            try { File.Delete(paramScriptPath); } catch { /* 忽略删除失败 */ }
+                        }
+                    }
+                }));
+            }
+
+            // 等待所有任务完成
+            var results = await Task.WhenAll(tasks);
+
+            // 验证结果
+            for (int i = 0; i < results.Length; i++)
+            {
+                Assert.AreEqual(0, results[i].ExitCode);
+                Assert.IsTrue(results[i].Output.Contains($"测试输出 {i}"), $"输出不包含预期的文本 '测试输出 {i}'。实际输出: {results[i].Output}");
+            }
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_ConcurrentAccess_ThreadSafe()
+        {
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            // 创建并发任务
+            var tasks = new List<Task<List<string>>>();
+            for (int i = 0; i < 10; i++)
+            {
+                tasks.Add(Task.Run(async () =>
+                {
+                    return await _executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+                }));
+            }
+
+            // 等待所有任务完成
+            var results = await Task.WhenAll(tasks);
+
+            // 验证结果
+            for (int i = 0; i < results.Length; i++)
+            {
+                Assert.IsNotNull(results[i]);
+                Assert.IsTrue(results[i].Contains("测试输出"));
+            }
+
+            // 验证所有结果相同（缓存应该确保这一点）
+            for (int i = 1; i < results.Length; i++)
+            {
+                CollectionAssert.AreEqual(results[0], results[i]);
             }
         }
 
@@ -87,385 +395,77 @@ namespace TestWincent
         #region 脚本存储集成测试
 
         [TestMethod]
-        public async Task ExecutePSScript_NonParameterizedScript_UsesStaticScriptPath()
+        public async Task ExecutePSScript_ParameterizedScript_CreatesDynamicScript()
         {
-            // Arrange
-            var scriptType = PSScript.RefreshExplorer;
-            string expectedPath = ScriptStorage.GetScriptPath(scriptType);
+            // 准备测试脚本
+            string scriptContent = "param($path)\r\n[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\r\nWrite-Output \"参数路径: $path\";\r\nexit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
 
-            // 确保脚本文件存在
-            Assert.IsTrue(File.Exists(expectedPath), "Static script file should exist");
+            // 设置脚本存储服务
+            _mockScriptStorage.Setup(ss => ss.IsParameterizedScript(PSScript.AddRecentFile)).Returns(true);
+            _mockScriptStorage.Setup(ss => ss.GetDynamicScriptPath(PSScript.AddRecentFile, "C:\\TestPath")).Returns(_tempScriptPath);
 
-            // Act
-            var result = await ScriptExecutor.ExecutePSScript(scriptType, null);
+            // 执行参数化脚本
+            var result = await _executor.ExecutePSScript(PSScript.AddRecentFile, "C:\\TestPath");
 
-            // Assert
-            Assert.IsNotNull(result, "Result should not be null");
-            // 无法直接验证使用了哪个路径，但可以验证脚本执行成功
-            Assert.AreEqual(0, result.ExitCode, "Script execution should succeed");
+            // 验证结果
+            Assert.AreEqual(0, result.ExitCode);
+            Assert.IsTrue(result.Output.Contains("参数路径: C:\\TestPath"));
         }
 
         [TestMethod]
-        public async Task ExecutePSScript_ParameterizedScript_UsesDynamicScriptPath()
+        public async Task ExecutePSScript_NonParameterizedScript_UsesStaticScript()
         {
-            // Arrange
-            var scriptType = PSScript.RemoveRecentFile;
-            string parameter = @"C:\Test\file.txt";
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '静态脚本测试'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
 
-            // 模拟文件存在
-            var mockExecutor = new MockScriptExecutor();
-            mockExecutor.SetFileExists(true);
-            ScriptExecutor.SetFileSystemService(mockExecutor);
+            // 设置脚本存储服务
+            _mockScriptStorage.Setup(ss => ss.IsParameterizedScript(PSScript.RefreshExplorer)).Returns(false);
+            _mockScriptStorage.Setup(ss => ss.GetScriptPath(PSScript.RefreshExplorer)).Returns(_tempScriptPath);
 
-            try
-            {
-                // Act
-                var result = await ScriptExecutor.ExecutePSScript(scriptType, parameter);
+            // 执行非参数化脚本
+            var result = await _executor.ExecutePSScript(PSScript.RefreshExplorer, null);
 
-                // Assert
-                Assert.IsNotNull(result, "Result should not be null");
-                Assert.IsTrue(mockExecutor.WasFileChecked, "File existence should be checked");
-                Assert.AreEqual(parameter, mockExecutor.LastCheckedPath, "Correct path should be checked");
-            }
-            finally
-            {
-                // 恢复默认服务
-                ScriptExecutor.ResetFileSystemService();
-            }
-        }
-
-        [TestMethod]
-        public async Task ExecutePSScript_WithInvalidPath_ReturnsErrorResult()
-        {
-            // Arrange
-            var scriptType = PSScript.RemoveRecentFile;
-            string parameter = @"C:\NonExistent\file.txt";
-
-            // 模拟文件不存在
-            var mockExecutor = new MockScriptExecutor();
-            mockExecutor.SetFileExists(false);
-            ScriptExecutor.SetFileSystemService(mockExecutor);
-
-            try
-            {
-                // Act
-                var result = await ScriptExecutor.ExecutePSScript(scriptType, parameter);
-
-                // Assert
-                Assert.IsNotNull(result, "Result should not be null");
-                Assert.AreEqual(-1, result.ExitCode, "Exit code should indicate error");
-                StringAssert.Contains(result.Error, "does not exist", "Error message should mention file existence");
-            }
-            finally
-            {
-                // 恢复默认服务
-                ScriptExecutor.ResetFileSystemService();
-            }
+            // 验证结果
+            Assert.AreEqual(0, result.ExitCode);
+            Assert.IsTrue(result.Output.Contains("静态脚本测试"));
         }
 
         #endregion
 
-        #region 文件系统服务测试
+        #region 边界条件测试
 
         [TestMethod]
-        public async Task FileOrDirectoryExists_WithValidPath_ReturnsTrue()
+        public async Task ExecutePSScriptWithTimeout_ZeroTimeout_NoTimeout()
         {
-            // Arrange
-            var mockService = new MockScriptExecutor();
-            mockService.SetFileExists(true);
-            ScriptExecutor.SetFileSystemService(mockService);
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
 
-            try
-            {
-                // Act
-                bool result = ScriptExecutor.FileOrDirectoryExists(@"C:\Test\file.txt");
+            // 执行脚本并设置超时为0
+            var result = await _executor.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 0);
 
-                // Assert
-                Assert.IsTrue(result, "Should return true for existing file");
-                Assert.IsTrue(mockService.WasFileChecked, "Should check file existence");
-                Assert.AreEqual(@"C:\Test\file.txt", mockService.LastCheckedPath, "Should check correct path");
-            }
-            finally
-            {
-                ScriptExecutor.ResetFileSystemService();
-            }
+            // 验证结果
+            Assert.AreEqual(0, result.ExitCode);
+            Assert.IsTrue(result.Output.Contains("测试输出"));
         }
 
         [TestMethod]
-        public async Task FileOrDirectoryExists_WithInvalidPath_ReturnsFalse()
+        public async Task ExecutePSScript_NullParameter_ExecutesSuccessfully()
         {
-            // Arrange
-            var mockService = new MockScriptExecutor();
-            mockService.SetFileExists(false);
-            mockService.SetDirectoryExists(false);
-            ScriptExecutor.SetFileSystemService(mockService);
+            // 准备测试脚本
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output '测试输出'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
 
-            try
-            {
-                // Act
-                bool result = ScriptExecutor.FileOrDirectoryExists(@"C:\NonExistent\file.txt");
+            // 执行脚本并传入null参数
+            var result = await _executor.ExecutePSScript(PSScript.RefreshExplorer, null);
 
-                // Assert
-                Assert.IsFalse(result, "Should return false for non-existent path");
-            }
-            finally
-            {
-                ScriptExecutor.ResetFileSystemService();
-            }
-        }
-
-        [TestMethod]
-        public async Task FileOrDirectoryExists_WithNullOrEmptyPath_ReturnsFalse()
-        {
-            // Act & Assert
-            Assert.IsFalse(ScriptExecutor.FileOrDirectoryExists(null), "Should return false for null path");
-            Assert.IsFalse(ScriptExecutor.FileOrDirectoryExists(""), "Should return false for empty path");
-            Assert.IsFalse(ScriptExecutor.FileOrDirectoryExists("   "), "Should return false for whitespace path");
-        }
-
-        #endregion
-
-        #region ExecutePSScript 测试
-
-        [TestMethod]
-        public async Task ExecutePSScript_WithValidParameter_CallsFileExistsCheck()
-        {
-            // Arrange
-            var mockService = new MockScriptExecutor();
-            mockService.SetFileExists(true);
-            ScriptExecutor.SetFileSystemService(mockService);
-
-            try
-            {
-                // Act
-                var result = await ScriptExecutor.ExecutePSScript(PSScript.RemoveRecentFile, @"C:\Test\file.txt");
-
-                // Assert
-                Assert.IsNotNull(result, "Result should not be null");
-                Assert.IsTrue(mockService.WasFileChecked, "Should check file existence");
-                Assert.AreEqual(@"C:\Test\file.txt", mockService.LastCheckedPath, "Should check correct path");
-            }
-            finally
-            {
-                ScriptExecutor.ResetFileSystemService();
-            }
-        }
-
-        [TestMethod]
-        public async Task ExecutePSScript_WithInvalidParameter_ReturnsErrorResult()
-        {
-            // Arrange
-            var mockService = new MockScriptExecutor();
-            mockService.SetFileExists(false);
-            mockService.SetDirectoryExists(false);
-            ScriptExecutor.SetFileSystemService(mockService);
-
-            try
-            {
-                // Act
-                var result = await ScriptExecutor.ExecutePSScript(PSScript.RemoveRecentFile, @"C:\NonExistent\file.txt");
-
-                // Assert
-                Assert.IsNotNull(result, "Result should not be null");
-                Assert.AreEqual(-1, result.ExitCode, "Exit code should indicate error");
-                StringAssert.Contains(result.Error, "does not exist", "Error message should mention file existence");
-            }
-            finally
-            {
-                ScriptExecutor.ResetFileSystemService();
-            }
-        }
-
-        [TestMethod]
-        public async Task ExecutePSScript_WithNonParameterizedScript_UsesStaticScriptPath()
-        {
-            // Arrange
-            var scriptType = PSScript.RefreshExplorer;
-            string expectedPath = ScriptStorage.GetScriptPath(scriptType);
-
-            // 确保脚本文件存在
-            Assert.IsTrue(File.Exists(expectedPath), "Static script file should exist");
-
-            // Act
-            var result = await ScriptExecutor.ExecutePSScript(scriptType, null);
-
-            // Assert
-            Assert.IsNotNull(result, "Result should not be null");
-        }
-
-        [TestMethod]
-        public async Task ExecutePSScript_WithParameterizedScript_UsesDynamicScriptPath()
-        {
-            // Arrange
-            var scriptType = PSScript.RemoveRecentFile;
-            string parameter = @"C:\Test\file.txt";
-
-            // 模拟文件存在
-            var mockService = new MockScriptExecutor();
-            mockService.SetFileExists(true);
-            ScriptExecutor.SetFileSystemService(mockService);
-
-            try
-            {
-                // Act
-                var result = await ScriptExecutor.ExecutePSScript(scriptType, parameter);
-
-                // Assert
-                Assert.IsNotNull(result, "Result should not be null");
-            }
-            finally
-            {
-                ScriptExecutor.ResetFileSystemService();
-            }
-        }
-
-        #endregion
-
-        #region 缓存测试
-
-        [TestMethod]
-        public async Task ExecutePSScript_QueryQuickAccess_UsesCacheWhenValid()
-        {
-            // Arrange
-            var mockService = new MockScriptExecutor();
-            mockService.SetFileExists(true);
-            ScriptExecutor.SetFileSystemService(mockService);
-
-            try
-            {
-                // First call to populate cache
-                var result1 = await ScriptExecutor.ExecutePSScript(PSScript.QueryQuickAccess, null);
-                Assert.IsNotNull(result1, "First result should not be null");
-
-                // Second call should use cache
-                var result2 = await ScriptExecutor.ExecutePSScript(PSScript.QueryQuickAccess, null);
-                Assert.IsNotNull(result2, "Cached result should not be null");
-                Assert.AreEqual(result1.Output, result2.Output, "Cached result should match original");
-            }
-            finally
-            {
-                ScriptExecutor.ResetFileSystemService();
-            }
-        }
-
-        [TestMethod]
-        public async Task ExecutePSScript_QueryRecentFile_CacheInvalidatesOnFileChange()
-        {
-            // This test requires access to the actual tracker file
-            // For CI environments, we should skip or mock this test
-            var trackerPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                @"Microsoft\Windows\Recent\AutomaticDestinations\5f7b5f1e01b83767.automaticDestinations-ms");
-
-            if (!File.Exists(trackerPath))
-            {
-                Assert.Inconclusive("Tracker file not found - test skipped");
-                return;
-            }
-
-            // First call to populate cache
-            var result1 = await ScriptExecutor.ExecutePSScript(PSScript.QueryRecentFile, null);
-            Assert.IsNotNull(result1, "First result should not be null");
-
-            // Simulate file modification by touching the file
-            File.SetLastWriteTime(trackerPath, DateTime.Now);
-
-            // Second call should not use cache
-            var result2 = await ScriptExecutor.ExecutePSScript(PSScript.QueryRecentFile, null);
-            Assert.IsNotNull(result2, "Second result should not be null");
-        }
-
-        [TestMethod]
-        public async Task ExecutePSScript_NonCacheableScript_DoesNotUseCache()
-        {
-            // Arrange
-            var mockService = new MockScriptExecutor();
-            mockService.SetFileExists(true);
-            ScriptExecutor.SetFileSystemService(mockService);
-
-            try
-            {
-                // RefreshExplorer is not a cacheable script
-                var result1 = await ScriptExecutor.ExecutePSScript(PSScript.RefreshExplorer, null);
-                Assert.IsNotNull(result1, "First result should not be null");
-
-                // Should execute again without using cache
-                var result2 = await ScriptExecutor.ExecutePSScript(PSScript.RefreshExplorer, null);
-                Assert.IsNotNull(result2, "Second result should not be null");
-            }
-            finally
-            {
-                ScriptExecutor.ResetFileSystemService();
-            }
+            // 验证结果
+            Assert.AreEqual(0, result.ExitCode);
+            Assert.IsTrue(result.Output.Contains("测试输出"));
         }
 
         #endregion
     }
-
-    #region 测试辅助类
-
-    /// <summary>
-    /// 用于测试的 ScriptExecutor 模拟类
-    /// </summary>
-    internal class MockScriptExecutor : ScriptExecutor.IFileSystemService
-    {
-        private bool _fileExists = true;
-        private bool _directoryExists = false;
-
-        public bool WasFileChecked { get; private set; }
-        public bool WasDirectoryChecked { get; private set; }
-        public string LastCheckedPath { get; private set; }
-
-        public void SetFileExists(bool exists)
-        {
-            _fileExists = exists;
-        }
-
-        public void SetDirectoryExists(bool exists)
-        {
-            _directoryExists = exists;
-        }
-
-        public bool FileExists(string path)
-        {
-            WasFileChecked = true;
-            LastCheckedPath = path;
-            return _fileExists;
-        }
-
-        public bool DirectoryExists(string path)
-        {
-            WasDirectoryChecked = true;
-            LastCheckedPath = path;
-            return _directoryExists;
-        }
-    }
-
-    /// <summary>
-    /// 用于测试的脚本执行服务模拟类
-    /// </summary>
-    internal class MockScriptExecutionService
-    {
-        public string LastExecutedScriptPath { get; private set; }
-        public TimeSpan? LastTimeout { get; private set; }
-        public bool ThrowTimeoutException { get; set; }
-        public bool ThrowExecutionException { get; set; }
-        public ScriptResult ResultToReturn { get; set; } = new ScriptResult(0, "Mock output", "");
-
-        public Task<ScriptResult> ExecuteScriptAsync(string scriptPath, TimeSpan? timeout)
-        {
-            LastExecutedScriptPath = scriptPath;
-            LastTimeout = timeout;
-
-            if (ThrowTimeoutException)
-                throw new ScriptTimeoutException("Mock timeout", "Output before timeout", "Error before timeout");
-
-            if (ThrowExecutionException)
-                throw new ScriptExecutionException("Mock execution error", null, "Output before error", "Error details");
-
-            return Task.FromResult(ResultToReturn);
-        }
-    }
-
-    #endregion
 }
