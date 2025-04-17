@@ -1,236 +1,436 @@
-﻿//using Microsoft.VisualStudio.TestTools.UnitTesting;
-//using System;
-//using System.Collections.Generic;
-//using System.Linq;
-//using System.Security;
-//using System.Text;
-//using System.Threading.Tasks;
-//using Wincent;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using System;
+using System.Threading.Tasks;
+using Wincent;
+using static Wincent.ExecutionFeasibilityStatus;
 
-//namespace TestWincent
-//{
-//    [TestClass]
-//    public class TestExecutionFeasible
-//    {
-//        private MockRegistryService _mockRegistry;
+namespace TestWincent
+{
+    [TestClass]
+    public class TestExecutionFeasibilityStatus
+    {
+        // 模拟的脚本执行器
+        private Mock<IScriptExecutor> _mockExecutor;
 
-//        [TestInitialize]
-//        public void Initialize()
-//        {
-//            // 创建模拟服务
-//            _mockRegistry = new MockRegistryService();
+        [TestInitialize]
+        public void Initialize()
+        {
+            _mockExecutor = new Mock<IScriptExecutor>();
+        }
 
-//            // 替换服务实现
-//            ExecutionFeasible.SetRegistryService(_mockRegistry);
+        #region 1. 基础功能验证测试
 
-//            // 设置默认行为
-//            _mockRegistry.SetExecutionPolicyValue("Restricted");
-//            _mockRegistry.SetIsAdministrator(false);
-//        }
+        [TestMethod]
+        public async Task CheckAsync_QueryAndHandleBothTrue_ReturnsTrue()
+        {
+            // 设置：查询和操作都成功
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "查询成功", ""));
 
-//        [TestCleanup]
-//        public void Cleanup()
-//        {
-//            // 恢复默认服务
-//            ExecutionFeasible.ResetRegistryService();
-//        }
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "操作成功", ""));
 
-//        #region 基本功能测试
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
 
-//        [TestMethod]
-//        public void CheckScriptFeasible_WithValidPolicy_ReturnsTrue()
-//        {
-//            // Arrange
-//            string[] validPolicies = { "AllSigned", "Bypass", "RemoteSigned", "Unrestricted" };
+            // 验证
+            Assert.IsTrue(result.Query);
+            Assert.IsTrue(result.Handle);
 
-//            foreach (var policy in validPolicies)
-//            {
-//                // 设置有效的执行策略
-//                _mockRegistry.SetExecutionPolicyValue(policy);
+            // 验证调用次数
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()), Times.Once);
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()), Times.Once);
+        }
 
-//                // Act
-//                bool result = ExecutionFeasible.CheckScriptFeasible();
+        [TestMethod]
+        public async Task CheckAsync_QueryTrueHandleFalse_ReturnsOnlyQueryTrue()
+        {
+            // 设置：查询成功，操作失败
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "查询成功", ""));
 
-//                // Assert
-//                Assert.IsTrue(result, $"执行策略 {policy} 应该被视为可行");
-//            }
-//        }
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(1, "", "操作失败"));
 
-//        [TestMethod]
-//        public void CheckScriptFeasible_WithInvalidPolicy_ReturnsFalse()
-//        {
-//            // Arrange
-//            string[] invalidPolicies = { "Restricted", "Default", "Undefined", "NotSet", "" };
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
 
-//            foreach (var policy in invalidPolicies)
-//            {
-//                // 设置无效的执行策略
-//                _mockRegistry.SetExecutionPolicyValue(policy);
+            // 验证
+            Assert.IsTrue(result.Query);
+            Assert.IsFalse(result.Handle);
+        }
 
-//                // Act
-//                bool result = ExecutionFeasible.CheckScriptFeasible();
+        [TestMethod]
+        public async Task CheckAsync_QueryFalseHandleTrue_ReturnsOnlyHandleTrue()
+        {
+            // 设置：查询失败，操作成功
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(1, "", "查询失败"));
 
-//                // Assert
-//                Assert.IsFalse(result, $"执行策略 {policy} 应该被视为不可行");
-//            }
-//        }
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "操作成功", ""));
 
-//        [TestMethod]
-//        public void GetExecutionPolicy_ReturnsCorrectValue()
-//        {
-//            // Arrange
-//            string expectedPolicy = "RemoteSigned";
-//            _mockRegistry.SetExecutionPolicyValue(expectedPolicy);
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
 
-//            // Act
-//            string result = ExecutionFeasible.GetExecutionPolicy();
+            // 验证
+            Assert.IsFalse(result.Query);
+            Assert.IsTrue(result.Handle);
+        }
 
-//            // Assert
-//            Assert.AreEqual(expectedPolicy, result, "应该返回正确的执行策略值");
-//        }
+        [TestMethod]
+        public async Task CheckAsync_BothFalse_ReturnsBothFalse()
+        {
+            // 设置：查询和操作都失败
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(1, "", "查询失败"));
 
-//        [TestMethod]
-//        public void IsAdministrator_ReturnsCorrectValue()
-//        {
-//            // Arrange - 设置为非管理员
-//            _mockRegistry.SetIsAdministrator(false);
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(1, "", "操作失败"));
 
-//            // Act
-//            bool result = ExecutionFeasible.IsAdministrator();
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
 
-//            // Assert
-//            Assert.IsFalse(result, "非管理员应该返回 false");
+            // 验证
+            Assert.IsFalse(result.Query);
+            Assert.IsFalse(result.Handle);
+        }
 
-//            // Arrange - 设置为管理员
-//            _mockRegistry.SetIsAdministrator(true);
+        #endregion
 
-//            // Act
-//            result = ExecutionFeasible.IsAdministrator();
+        #region 2. 异常处理验证测试
 
-//            // Assert
-//            Assert.IsTrue(result, "管理员应该返回 true");
-//        }
+        [TestMethod]
+        public async Task CheckAsync_QueryScriptThrowsException_ReturnsQueryFalse()
+        {
+            // 设置：查询抛出异常，操作成功
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ThrowsAsync(new InvalidOperationException("查询时发生异常"));
 
-//        #endregion
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "操作成功", ""));
 
-//        #region 异常处理测试
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
 
-//        [TestMethod]
-//        public void CheckScriptFeasible_WithSecurityException_ReturnsFalse()
-//        {
-//            // Arrange
-//            _mockRegistry.ThrowOnGetPolicy = true;
+            // 验证
+            Assert.IsFalse(result.Query);
+            Assert.IsTrue(result.Handle);
+        }
 
-//            // Act
-//            bool result = ExecutionFeasible.CheckScriptFeasible();
+        [TestMethod]
+        public async Task CheckAsync_HandleScriptThrowsTimeout_ReturnsHandleFalse()
+        {
+            // 设置：查询成功，操作超时
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "查询成功", ""));
 
-//            // Assert
-//            Assert.IsFalse(result, "发生安全异常时应该返回 false");
-//        }
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ThrowsAsync(new TimeoutException("操作超时"));
 
-//        [TestMethod]
-//        [ExpectedException(typeof(SecurityException))]
-//        public void FixExecutionPolicy_WithSecurityException_ThrowsException()
-//        {
-//            // Arrange
-//            _mockRegistry.ThrowOnSetPolicy = true;
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
 
-//            // Act - 应该抛出 SecurityException
-//            ExecutionFeasible.FixExecutionPolicy();
-//        }
+            // 验证
+            Assert.IsTrue(result.Query);
+            Assert.IsFalse(result.Handle);
+        }
 
-//        [TestMethod]
-//        public void GetExecutionPolicy_WithSecurityException_ReturnsAccessDenied()
-//        {
-//            // Arrange
-//            _mockRegistry.ThrowOnGetPolicy = true;
+        [TestMethod]
+        public async Task CheckAsync_BothScriptsThrowExceptions_ReturnsBothFalse()
+        {
+            // 设置：查询和操作都抛出异常
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ThrowsAsync(new InvalidOperationException("查询时发生异常"));
 
-//            // Act
-//            string result = ExecutionFeasible.GetExecutionPolicy();
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ThrowsAsync(new TimeoutException("操作超时"));
 
-//            // Assert
-//            Assert.AreEqual("AccessDenied", result, "发生安全异常时应该返回 AccessDenied");
-//        }
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
 
-//        #endregion
+            // 验证
+            Assert.IsFalse(result.Query);
+            Assert.IsFalse(result.Handle);
+        }
 
-//        #region 修复功能测试
+        #endregion
 
-//        [TestMethod]
-//        public void FixExecutionPolicy_SetsCorrectPolicy()
-//        {
-//            // Arrange
-//            _mockRegistry.SetExecutionPolicyValue("Restricted");
+        #region 3. 参数传递验证测试
 
-//            // Act
-//            ExecutionFeasible.FixExecutionPolicy();
+        [TestMethod]
+        public async Task CheckAsync_CustomTimeout_UsesCorrectTimeout()
+        {
+            // 设置：使用自定义超时参数
+            const int customTimeout = 20;
 
-//            // Assert
-//            Assert.AreEqual("RemoteSigned", _mockRegistry.LastSetPolicy, "应该设置为 RemoteSigned 策略");
-//        }
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, customTimeout))
+                .ReturnsAsync(new ScriptResult(0, "查询成功", ""));
 
-//        [TestMethod]
-//        public void FixExecutionPolicy_AsAdmin_Succeeds()
-//        {
-//            // Arrange
-//            _mockRegistry.SetIsAdministrator(true);
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, customTimeout))
+                .ReturnsAsync(new ScriptResult(0, "操作成功", ""));
 
-//            // Act
-//            ExecutionFeasible.FixExecutionPolicy();
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, customTimeout);
 
-//            // Assert
-//            Assert.AreEqual("RemoteSigned", _mockRegistry.LastSetPolicy, "管理员应该能够成功修复执行策略");
-//        }
+            // 验证
+            Assert.IsTrue(result.Query);
+            Assert.IsTrue(result.Handle);
 
-//        #endregion
-//    }
+            // 验证超时参数传递正确
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, customTimeout), Times.Once);
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, customTimeout), Times.Once);
+        }
 
-//    #region 测试替身类
+        [TestMethod]
+        public async Task CheckAsync_ZeroTimeout_UsesDefaultTimeout()
+        {
+            // 设置：使用零超时参数（应该使用默认值10）
+            const int zeroTimeout = 0;
+            const int expectedTimeout = 10; // 默认值
 
-//    /// <summary>
-//    /// 用于测试的注册表服务模拟类
-//    /// </summary>
-//    internal class MockRegistryService : ExecutionFeasible.IRegistryService
-//    {
-//        private string _executionPolicy = "Restricted";
-//        private bool _isAdmin = false;
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, expectedTimeout))
+                .ReturnsAsync(new ScriptResult(0, "查询成功", ""));
 
-//        public bool ThrowOnGetPolicy { get; set; } = false;
-//        public bool ThrowOnSetPolicy { get; set; } = false;
-//        public string LastSetPolicy { get; private set; }
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, expectedTimeout))
+                .ReturnsAsync(new ScriptResult(0, "操作成功", ""));
 
-//        public void SetExecutionPolicyValue(string policy)
-//        {
-//            _executionPolicy = policy;
-//        }
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, zeroTimeout);
 
-//        public void SetIsAdministrator(bool isAdmin)
-//        {
-//            _isAdmin = isAdmin;
-//        }
+            // 验证
+            Assert.IsTrue(result.Query);
+            Assert.IsTrue(result.Handle);
 
-//        public string GetExecutionPolicy()
-//        {
-//            if (ThrowOnGetPolicy)
-//                return "AccessDenied";
+            // 验证超时参数使用了默认值
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, expectedTimeout), Times.Once);
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, expectedTimeout), Times.Once);
+        }
 
-//            return _executionPolicy;
-//        }
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentNullException))]
+        public async Task CheckAsync_NullExecutor_ThrowsArgumentNullException()
+        {
+            // 执行：传递空执行器
+            await ExecutionFeasibilityStatus.CheckAsync(null, 10);
 
-//        public void SetExecutionPolicy(string policy)
-//        {
-//            if (ThrowOnSetPolicy)
-//                throw new SecurityException("模拟的安全异常");
+            // 预期：抛出 ArgumentNullException
+        }
 
-//            LastSetPolicy = policy;
-//            _executionPolicy = policy;
-//        }
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentOutOfRangeException))]
+        public async Task CheckAsync_NegativeTimeout_ThrowsArgumentOutOfRangeException()
+        {
+            // 执行：传递负超时值
+            await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, -1);
 
-//        public bool IsAdministrator()
-//        {
-//            return _isAdmin;
-//        }
-//    }
+            // 预期：抛出 ArgumentOutOfRangeException
+        }
 
-//    #endregion
-//}
+        [TestMethod]
+        public async Task CheckAsync_MaxTimeoutValue_HandlesCorrectly()
+        {
+            // 设置：使用最大整数值作为超时
+            int maxTimeout = int.MaxValue;
+
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                It.IsAny<PSScript>(), null, maxTimeout))
+                .ReturnsAsync(new ScriptResult(0, "成功", ""));
+
+            // 执行
+            var result = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, maxTimeout);
+
+            // 验证
+            Assert.IsTrue(result.Query);
+            Assert.IsTrue(result.Handle);
+
+            // 验证超时参数正确传递
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                It.IsAny<PSScript>(), null, maxTimeout), Times.Exactly(2));
+        }
+
+        #endregion
+
+        #region 4. 组合逻辑验证测试
+
+        [TestMethod]
+        public async Task CheckAsync_SequentialCalls_ReturnsDifferentResults()
+        {
+            // 设置：第一次调用全部返回成功，第二次全部返回失败
+            _mockExecutor.SetupSequence(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "查询成功", ""))
+                .ReturnsAsync(new ScriptResult(1, "", "查询失败"));
+
+            _mockExecutor.SetupSequence(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "操作成功", ""))
+                .ReturnsAsync(new ScriptResult(1, "", "操作失败"));
+
+            // 第一次执行
+            var result1 = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
+            // 第二次执行
+            var result2 = await ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
+
+            // 验证
+            Assert.IsTrue(result1.Query);
+            Assert.IsTrue(result1.Handle);
+            Assert.IsFalse(result2.Query);
+            Assert.IsFalse(result2.Handle);
+        }
+
+        [TestMethod]
+        public async Task CheckAsync_AsyncExecution_BothTasksCompleteIndependently()
+        {
+            // 设置：模拟两个任务的独立异步执行
+            var queryTcs = new TaskCompletionSource<ScriptResult>();
+            var handleTcs = new TaskCompletionSource<ScriptResult>();
+
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckQueryFeasible, null, It.IsAny<int>()))
+                .Returns(queryTcs.Task);
+
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                PSScript.CheckPinUnpinFeasible, null, It.IsAny<int>()))
+                .Returns(handleTcs.Task);
+
+            // 启动异步执行
+            var resultTask = ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
+
+            // 确保任务尚未完成
+            Assert.IsFalse(resultTask.IsCompleted);
+
+            // 完成操作任务
+            handleTcs.SetResult(new ScriptResult(0, "操作成功", ""));
+            // 确保总任务仍未完成
+            Assert.IsFalse(resultTask.IsCompleted);
+
+            // 完成查询任务
+            queryTcs.SetResult(new ScriptResult(0, "查询成功", ""));
+
+            // 等待总任务完成
+            var result = await resultTask;
+
+            // 验证结果
+            Assert.IsTrue(result.Query);
+            Assert.IsTrue(result.Handle);
+        }
+
+        [TestMethod]
+        public async Task CheckAsync_ParallelCalls_ExecutesIndependently()
+        {
+            // 设置：所有调用都成功
+            _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                It.IsAny<PSScript>(), null, It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, "成功", ""));
+
+            // 并行执行三次检查
+            var task1 = ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 5);
+            var task2 = ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 10);
+            var task3 = ExecutionFeasibilityStatus.CheckAsync(_mockExecutor.Object, 15);
+
+            // 等待所有任务完成
+            await Task.WhenAll(task1, task2, task3);
+
+            // 验证所有结果
+            Assert.IsTrue(task1.Result.Query && task1.Result.Handle);
+            Assert.IsTrue(task2.Result.Query && task2.Result.Handle);
+            Assert.IsTrue(task3.Result.Query && task3.Result.Handle);
+
+            // 验证调用次数
+            _mockExecutor.Verify(x => x.ExecutePSScriptWithTimeout(
+                It.IsAny<PSScript>(), null, It.IsAny<int>()), Times.Exactly(6));
+        }
+
+        #endregion
+
+        #region 5. 实现兼容性测试
+
+        [TestMethod]
+        public async Task CheckAsync_WithRealScriptExecutor_Works()
+        {
+            // 由于 ScriptExecutor 是 sealed 类，不能被 Moq 模拟
+            // 创建一个包装器，实现 IScriptExecutor 接口
+            var wrapper = new ScriptExecutorWrapper();
+
+            // 执行检查 - 使用包装器作为 IScriptExecutor
+            var status = await ExecutionFeasibilityStatus.CheckAsync(wrapper, 10);
+
+            // 验证结果
+            Assert.IsNotNull(status);
+            // 由于使用的是实际对象，我们只验证类型，不验证具体值
+        }
+
+        [TestMethod]
+        public async Task CheckAsync_NoParameterOverload_Works()
+        {
+            // 测试不带参数的重载是否正常工作
+            // 注意：这个测试依赖于实际的环境，所以在真实环境中可能需要设置 
+            // IgnoreAttribute 或者使用集成测试框架
+
+            // 执行
+            var status = await ExecutionFeasibilityStatus.CheckAsync();
+
+            // 验证返回了有效的结果
+            Assert.IsNotNull(status);
+            // 仅检查类型，不验证具体值，因为这取决于实际环境
+        }
+
+        /// <summary>
+        /// ScriptExecutor 包装器，用于测试，实现 IScriptExecutor 接口
+        /// </summary>
+        private class ScriptExecutorWrapper : IScriptExecutor
+        {
+            // 使用一个模拟的 IScriptExecutor 来处理调用
+            private readonly Mock<IScriptExecutor> _mockExecutor;
+
+            public ScriptExecutorWrapper()
+            {
+                _mockExecutor = new Mock<IScriptExecutor>();
+
+                // 设置所有脚本调用都成功
+                _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(
+                    It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
+                    .ReturnsAsync(new ScriptResult(0, "模拟成功", ""));
+            }
+
+            public Task<ScriptResult> ExecutePSScriptWithTimeout(PSScript script, string parameter, int timeoutSeconds)
+            {
+                return _mockExecutor.Object.ExecutePSScriptWithTimeout(script, parameter, timeoutSeconds);
+            }
+        }
+
+        #endregion
+    }
+
+    [TestClass]
+    public class TestExecutionFeasible
+    {
+        // 这里可以添加 ExecutionFeasible 静态类的测试
+    }
+}

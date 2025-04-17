@@ -220,7 +220,7 @@ namespace Wincent
         }
     }
 
-    public sealed class ScriptExecutor : IDisposable
+    public sealed class ScriptExecutor : IDisposable, ExecutionFeasibilityStatus.IScriptExecutor
     {
         private readonly IFileSystemService _fileSystemService;
         private readonly IScriptStorageService _scriptStorageService;
@@ -638,6 +638,11 @@ namespace Wincent
         {
             // Clean resources
             ClearCache();
+        }
+
+        Task<ScriptResult> ExecutionFeasibilityStatus.IScriptExecutor.ExecutePSScriptWithTimeout(PSScript script, string parameter, int timeoutSeconds)
+        {
+            return ExecutePSScriptWithTimeout(script, parameter, timeoutSeconds);
         }
     }
 }
