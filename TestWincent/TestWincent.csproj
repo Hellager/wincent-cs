@@ -51,6 +51,7 @@
   <ItemGroup>
     <Compile Include="ExecutionFeasibleTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="QuickAccessDataFilesTests.cs" />
     <Compile Include="QuickAccessManagerTests.cs" />
     <Compile Include="QuickAccessQueryTests.cs" />
     <Compile Include="ScriptExecutorTests.cs" />

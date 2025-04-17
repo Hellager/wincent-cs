@@ -49,6 +49,7 @@
   <ItemGroup>
     <Compile Include="ExecutionFeasible.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="QuickAccessDataFiles.cs" />
     <Compile Include="QuickAccessManager.cs" />
     <Compile Include="QuickAccessQuery.cs" />
     <Compile Include="ScriptExecutor.cs" />
