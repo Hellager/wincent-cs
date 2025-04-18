@@ -47,13 +47,11 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ExecutionFeasible.cs" />
+    <Compile Include="ExecutionFeasibilityStatus.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="QuickAccessDataFiles.cs" />
     <Compile Include="QuickAccessManager.cs" />
-    <Compile Include="QuickAccessQuery.cs" />
     <Compile Include="ScriptExecutor.cs" />
-    <Compile Include="ScriptResultCache.cs" />
     <Compile Include="ScriptStorage.cs" />
     <Compile Include="ScriptStrategy.cs" />
     <Compile Include="TempFile.cs" />
