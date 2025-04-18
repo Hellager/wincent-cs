@@ -249,6 +249,8 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
+                $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')                
+
                 $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match ""Windows 11""
                 if ($isWin11)
                 {{
