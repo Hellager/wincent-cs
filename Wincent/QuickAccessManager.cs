@@ -177,6 +177,7 @@ namespace Wincent
     {
         public const uint SHARD_PATHW = 0x00000003;
         public const int COINIT_APARTMENTTHREADED = 0x2;
+        public const int COINIT_DISABLE_OLE1DDE = 0x4;
         public static readonly Guid FOLDERID_Recent = new Guid("{AE50C081-EBD2-438A-8655-8A092E34987A}");
         public static readonly string[] ProtectedPaths = { "System32", "Program Files" };
 
@@ -474,20 +475,42 @@ namespace Wincent
         private void AddFileToRecentDocs(string filePath)
         {
             ValidatePath(filePath, PathType.File, _fileSystem);
-
             IntPtr pathPtr = IntPtr.Zero;
+            bool comInitialized = false;
             try
             {
-                int hr = _nativeMethods.CoInitializeEx(IntPtr.Zero, NativeMethods.COINIT_APARTMENTTHREADED);
-                if (hr < 0) throw new Win32Exception(hr, "COM initialization failed");
-
+                // First attempt to uninitialize any existing COM context
+                try
+                {
+                    _nativeMethods.CoUninitialize();
+                }
+                catch { /* Ignore uninitialization failure */ }
+                // Re-initialize COM with combined flags
+                int hr = _nativeMethods.CoInitializeEx(IntPtr.Zero, 
+                    NativeMethods.COINIT_APARTMENTTHREADED | NativeMethods.COINIT_DISABLE_OLE1DDE);
+                
+                if (hr != 0 && hr != 1)
+                {
+                    throw new Win32Exception(hr, $"COM initialization failed with error code: 0x{hr:X8}");
+                }
+                comInitialized = true;
+                // Allocate unmanaged memory for the path string
                 pathPtr = Marshal.StringToHGlobalUni(filePath);
+                
+                // Add to recent documents using shell API
                 _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, pathPtr);
             }
             finally
             {
-                if (pathPtr != IntPtr.Zero) Marshal.FreeHGlobal(pathPtr);
-                _nativeMethods.CoUninitialize();
+                // Clean up unmanaged resources
+                if (pathPtr != IntPtr.Zero) 
+                    Marshal.FreeHGlobal(pathPtr);
+                    
+                // Properly uninitialize COM if we initialized it
+                if (comInitialized)
+                {
+                    _nativeMethods.CoUninitialize();
+                }
             }
         }
 
