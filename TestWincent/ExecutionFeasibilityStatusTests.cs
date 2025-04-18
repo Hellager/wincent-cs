@@ -3,7 +3,6 @@ using Moq;
 using System;
 using System.Threading.Tasks;
 using Wincent;
-using static Wincent.ExecutionFeasibilityStatus;
 
 namespace TestWincent
 {
@@ -11,12 +10,12 @@ namespace TestWincent
     public class TestExecutionFeasibilityStatus
     {
         // 模拟的脚本执行器
-        private Mock<IScriptExecutor> _mockExecutor;
+        private Mock<ExecutionFeasibilityStatus.IScriptExecutor> _mockExecutor;
 
         [TestInitialize]
         public void Initialize()
         {
-            _mockExecutor = new Mock<IScriptExecutor>();
+            _mockExecutor = new Mock<ExecutionFeasibilityStatus.IScriptExecutor>();
         }
 
         #region 1. 基础功能验证测试
@@ -236,8 +235,9 @@ namespace TestWincent
         [ExpectedException(typeof(ArgumentNullException))]
         public async Task CheckAsync_NullExecutor_ThrowsArgumentNullException()
         {
-            // 执行：传递空执行器
-            await ExecutionFeasibilityStatus.CheckAsync(null, 10);
+            // 执行：传递空执行器，明确指定调用 ExecutionFeasibilityStatus.IScriptExecutor 重载
+            ExecutionFeasibilityStatus.IScriptExecutor nullExecutor = null;
+            await ExecutionFeasibilityStatus.CheckAsync(nullExecutor, 10);
 
             // 预期：抛出 ArgumentNullException
         }
@@ -375,10 +375,10 @@ namespace TestWincent
         public async Task CheckAsync_WithRealScriptExecutor_Works()
         {
             // 由于 ScriptExecutor 是 sealed 类，不能被 Moq 模拟
-            // 创建一个包装器，实现 IScriptExecutor 接口
+            // 创建一个包装器，实现 ExecutionFeasibilityStatus.IScriptExecutor 接口
             var wrapper = new ScriptExecutorWrapper();
 
-            // 执行检查 - 使用包装器作为 IScriptExecutor
+            // 执行检查 - 使用包装器作为 ExecutionFeasibilityStatus.IScriptExecutor
             var status = await ExecutionFeasibilityStatus.CheckAsync(wrapper, 10);
 
             // 验证结果
@@ -402,16 +402,16 @@ namespace TestWincent
         }
 
         /// <summary>
-        /// ScriptExecutor 包装器，用于测试，实现 IScriptExecutor 接口
+        /// ScriptExecutor 包装器，用于测试，实现 ExecutionFeasibilityStatus.IScriptExecutor 接口
         /// </summary>
-        private class ScriptExecutorWrapper : IScriptExecutor
+        private class ScriptExecutorWrapper : ExecutionFeasibilityStatus.IScriptExecutor
         {
-            // 使用一个模拟的 IScriptExecutor 来处理调用
-            private readonly Mock<IScriptExecutor> _mockExecutor;
+            // 使用一个模拟的 ExecutionFeasibilityStatus.IScriptExecutor 来处理调用
+            private readonly Mock<ExecutionFeasibilityStatus.IScriptExecutor> _mockExecutor;
 
             public ScriptExecutorWrapper()
             {
-                _mockExecutor = new Mock<IScriptExecutor>();
+                _mockExecutor = new Mock<ExecutionFeasibilityStatus.IScriptExecutor>();
 
                 // 设置所有脚本调用都成功
                 _mockExecutor.Setup(x => x.ExecutePSScriptWithTimeout(

@@ -243,7 +243,8 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void GetRecentFilesModifiedTime_FileDoesNotExist_ReturnsCurrentTime()
+        [ExpectedException(typeof(FileNotFoundException))]
+        public void GetRecentFilesModifiedTime_FileDoesNotExist_ThrowsException()
         {
             // Arrange
             var mockFileSystem = new MockFileSystem();
@@ -251,17 +252,15 @@ namespace TestWincent
 
             var quickAccess = new QuickAccessDataFiles(mockFileSystem);
 
-            // Act
+            // Act - 应该抛出异常
             var result = quickAccess.GetRecentFilesModifiedTime();
 
-            // Assert
-            var now = DateTime.Now;
-            var timeDifference = (now - result).TotalSeconds;
-            Assert.IsTrue(timeDifference < 5); // 允许5秒的误差
+            // Assert - 通过 ExpectedException 特性验证
         }
 
         [TestMethod]
-        public void GetRecentFilesModifiedTime_ThrowsException_ReturnsCurrentTime()
+        [ExpectedException(typeof(IOException))]
+        public void GetRecentFilesModifiedTime_ThrowsException_PropagatesException()
         {
             // Arrange
             var mockFileSystem = new MockFileSystem();
@@ -270,13 +269,82 @@ namespace TestWincent
             // 设置获取时间时抛出异常
             var quickAccess = new QuickAccessDataFiles(new ThrowingFileSystem());
 
-            // Act
+            // Act - 应该抛出异常
             var result = quickAccess.GetRecentFilesModifiedTime();
 
+            // Assert - 通过 ExpectedException 特性验证
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(FileNotFoundException))]
+        public void GetFrequentFoldersModifiedTime_FileDoesNotExist_ThrowsException()
+        {
+            // Arrange
+            var mockFileSystem = new MockFileSystem();
+            mockFileSystem.FileExistsDefault = false;
+
+            var quickAccess = new QuickAccessDataFiles(mockFileSystem);
+
+            // Act - 应该抛出异常
+            var result = quickAccess.GetFrequentFoldersModifiedTime();
+
+            // Assert - 通过 ExpectedException 特性验证
+        }
+
+        [TestMethod]
+        public void GetQuickAccessModifiedTime_OnlyRecentFileExists_ReturnsRecentFileTime()
+        {
+            // Arrange
+            var expectedTime = new DateTime(2023, 5, 15);
+            var mockFileSystem = new MockFileSystem();
+
+            // 设置最近文件存在但常用文件夹不存在
+            mockFileSystem.SetFileExists("任意路径", false); // 设置默认为不存在
+            var quickAccess = new QuickAccessDataFiles(mockFileSystem);
+            mockFileSystem.SetFileExists(quickAccess.RecentFilesPath, true); // 设置最近文件存在
+            mockFileSystem.SetLastWriteTime(quickAccess.RecentFilesPath, expectedTime);
+
+            // Act
+            var result = quickAccess.GetQuickAccessModifiedTime();
+
             // Assert
-            var now = DateTime.Now;
-            var timeDifference = (now - result).TotalSeconds;
-            Assert.IsTrue(timeDifference < 5); // 允许5秒的误差
+            Assert.AreEqual(expectedTime, result);
+        }
+
+        [TestMethod]
+        public void GetQuickAccessModifiedTime_OnlyFrequentFolderExists_ReturnsFrequentFolderTime()
+        {
+            // Arrange
+            var expectedTime = new DateTime(2023, 6, 20);
+            var mockFileSystem = new MockFileSystem();
+
+            // 设置常用文件夹存在但最近文件不存在
+            mockFileSystem.SetFileExists("任意路径", false); // 设置默认为不存在
+            var quickAccess = new QuickAccessDataFiles(mockFileSystem);
+            mockFileSystem.SetFileExists(quickAccess.FrequentFoldersPath, true); // 设置常用文件夹存在
+            mockFileSystem.SetLastWriteTime(quickAccess.FrequentFoldersPath, expectedTime);
+
+            // Act
+            var result = quickAccess.GetQuickAccessModifiedTime();
+
+            // Assert
+            Assert.AreEqual(expectedTime, result);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(FileNotFoundException))]
+        public void GetQuickAccessModifiedTime_NeitherExists_ThrowsException()
+        {
+            // Arrange
+            var mockFileSystem = new MockFileSystem();
+            mockFileSystem.FileExistsDefault = false; // 设置所有文件都不存在
+
+            var quickAccess = new QuickAccessDataFiles(mockFileSystem);
+
+            // Act - 应该抛出异常
+            var result = quickAccess.GetQuickAccessModifiedTime();
+
+            // Assert - 通过 ExpectedException 特性验证
         }
     }
 
