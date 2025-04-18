@@ -220,7 +220,41 @@ namespace Wincent
         }
     }
 
-    public sealed class ScriptExecutor : IDisposable, ExecutionFeasibilityStatus.IScriptExecutor
+    /// <summary>
+    /// Script executor interface
+    /// </summary>
+    public interface IScriptExecutor : IDisposable
+    {
+        /// <summary>
+        /// Executes PowerShell script with caching and optional timeout
+        /// </summary>
+        /// <param name="method">Script type</param>
+        /// <param name="para">Script parameter (required for parameterized scripts)</param>
+        /// <param name="timeoutSeconds">Timeout duration in seconds (0 or negative values disable timeout)</param>
+        /// <returns>Script execution result (string list)</returns>
+        Task<List<string>> ExecutePSScriptWithCache(PSScript method, string para, int timeoutSeconds = 0);
+        /// <summary>
+        /// Executes PowerShell script without timeout
+        /// </summary>
+        /// <param name="method">Script type</param>
+        /// <param name="para">Script parameter (required for parameterized scripts)</param>
+        /// <returns>Script execution result</returns>
+        Task<ScriptResult> ExecutePSScript(PSScript method, string para);
+        /// <summary>
+        /// Executes PowerShell script with customizable timeout
+        /// </summary>
+        /// <param name="method">Script type</param>
+        /// <param name="para">Script parameter (required for parameterized scripts)</param>
+        /// <param name="timeoutSeconds">Timeout duration in seconds (0 disables timeout)</param>
+        /// <returns>Script execution result</returns>
+        Task<ScriptResult> ExecutePSScriptWithTimeout(PSScript method, string para, int timeoutSeconds);
+        /// <summary>
+        /// Clears script execution result cache
+        /// </summary>
+        void ClearCache();
+    }
+
+    public sealed class ScriptExecutor : IScriptExecutor
     {
         private readonly IFileSystemService _fileSystemService;
         private readonly IScriptStorageService _scriptStorageService;
@@ -638,11 +672,6 @@ namespace Wincent
         {
             // Clean resources
             ClearCache();
-        }
-
-        Task<ScriptResult> ExecutionFeasibilityStatus.IScriptExecutor.ExecutePSScriptWithTimeout(PSScript script, string parameter, int timeoutSeconds)
-        {
-            return ExecutePSScriptWithTimeout(script, parameter, timeoutSeconds);
         }
     }
 }
