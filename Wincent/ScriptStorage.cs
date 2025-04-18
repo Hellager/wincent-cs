@@ -82,8 +82,15 @@ namespace Wincent
         /// </summary>
         private static string GetCurrentVersion()
         {
-            var version = Assembly.GetExecutingAssembly().GetName().Version;
-            return $"v{version.Major}.{version.Minor}.{version.Build}";
+            try
+            {
+                var version = Assembly.GetExecutingAssembly().GetName().Version;
+                return $"v{version.Major}.{version.Minor}.{version.Build}";
+            }
+            catch
+            {
+                return "v0.1.0";
+            }
         }
 
         /// <summary>

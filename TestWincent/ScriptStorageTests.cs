@@ -26,7 +26,7 @@ namespace TestWincent
             }
             catch
             {
-                _testScriptVersion = "v1.0.0";
+                _testScriptVersion = "v0.1.0";
             }
 
             // 创建测试文件，用于测试清理功能
