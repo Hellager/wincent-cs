@@ -129,6 +129,23 @@ namespace Wincent
             }
         }
 
+        public static async Task<bool> CheckFeasibilityAsync(
+            ScriptExecutor executor,
+            PSScript script,
+            int timeoutSeconds)
+        {
+            try
+            {
+                var result = await executor.ExecutePSScriptWithTimeout(script, null, timeoutSeconds);
+                return result.ExitCode == 0;
+            }
+            catch (Exception)
+            {
+                // Any exception indicates failure
+                return false;
+            }
+        }
+
         /// <summary>
         /// Adapter for converting Wincent.IScriptExecutor to ExecutionFeasibilityStatus.IScriptExecutor
         /// </summary>

@@ -4,6 +4,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
 using System.Text;
+using System.Diagnostics;
+using System.Threading;
+using System.CodeDom.Compiler;
 using Wincent;
 
 namespace TestConsole
@@ -113,6 +116,9 @@ namespace TestConsole
                     case '5':
                         await SearchItems(quickAccessManager);
                         break;
+                    case '6':
+                        await PerformPerformanceTest(quickAccessManager);
+                        break;
                     case '0':
                         exit = true;
                         break;
@@ -135,6 +141,7 @@ namespace TestConsole
             Console.WriteLine("3. 移除项目");
             Console.WriteLine("4. 批量操作");
             Console.WriteLine("5. 关键字搜索");
+            Console.WriteLine("6. 执行性能测试");
             Console.WriteLine("0. 退出程序");
             Console.Write("请选择: ");
         }
@@ -621,6 +628,109 @@ namespace TestConsole
         {
             Console.WriteLine("\n按任意键继续...");
             Console.ReadKey(true);
+        }
+
+        static async Task PerformPerformanceTest(IQuickAccessManager quickAccessManager)
+        {
+            Console.Clear();
+            Console.WriteLine("=== 系统兼容性检查性能测试 ===");
+            Console.WriteLine("即将执行10次系统兼容性检查，每次间隔1秒");
+            Console.WriteLine("按任意键开始测试...");
+            Console.ReadKey(true);
+
+            Console.Clear();
+            Console.WriteLine("=== 系统兼容性检查性能测试 ===");
+            Console.WriteLine("正在执行测试...\n");
+
+            // 用于存储每次执行的耗时
+            List<long> queryExecutionTimes = new List<long>();
+            List<long> handleExecutionTimes = new List<long>();
+            List<long> totalExecutionTimes = new List<long>();
+            var _executor = new ScriptExecutor();
+
+            for (int i = 1; i <= 10; i++)
+            {
+                Console.WriteLine($"执行第 {i} 次检查中...");
+
+                // 总耗时计时
+                Stopwatch totalStopwatch = new Stopwatch();
+                totalStopwatch.Start();
+
+                // 查询功能检测耗时
+                Stopwatch queryStopwatch = new Stopwatch();
+                queryStopwatch.Start();
+                var queryFeasible = await ExecutionFeasibilityStatus.CheckFeasibilityAsync(_executor, PSScript.CheckQueryFeasible, 10);
+                queryStopwatch.Stop();
+                long queryElapsedMs = queryStopwatch.ElapsedMilliseconds;
+                queryExecutionTimes.Add(queryElapsedMs);
+
+                // 操作功能检测耗时
+                Stopwatch handleStopwatch = new Stopwatch();
+                handleStopwatch.Start();
+                var handleFeasible = await ExecutionFeasibilityStatus.CheckFeasibilityAsync(_executor, PSScript.CheckPinUnpinFeasible, 10);
+                handleStopwatch.Stop();
+                long handleElapsedMs = handleStopwatch.ElapsedMilliseconds;
+                handleExecutionTimes.Add(handleElapsedMs);
+
+                // 计算总耗时
+                totalStopwatch.Stop();
+                long totalElapsedMs = totalStopwatch.ElapsedMilliseconds;
+                totalExecutionTimes.Add(totalElapsedMs);
+
+                Console.WriteLine($"第 {i} 次检查结果: 查询功能={queryFeasible}, 操作功能={handleFeasible}");
+                Console.WriteLine($"查询功能耗时: {queryElapsedMs} 毫秒");
+                Console.WriteLine($"操作功能耗时: {handleElapsedMs} 毫秒");
+                Console.WriteLine($"总耗时: {totalElapsedMs} 毫秒\n");
+
+                // 最后一次测试后不需要等待
+                if (i < 10)
+                {
+                    Console.WriteLine("等待1秒...");
+                    await Task.Delay(1000);
+                }
+            }
+
+            // 计算并显示统计信息
+            if (totalExecutionTimes.Count > 0)
+            {
+                Console.WriteLine("\n=== 测试统计信息 ===");
+                Console.WriteLine($"总执行次数: 10");
+
+                // 查询功能统计
+                double queryAvgTime = queryExecutionTimes.Average();
+                long queryMinTime = queryExecutionTimes.Min();
+                long queryMaxTime = queryExecutionTimes.Max();
+                long queryTotalTime = queryExecutionTimes.Sum();
+                Console.WriteLine("\n--- 查询功能耗时统计 ---");
+                Console.WriteLine($"总耗时: {queryTotalTime} 毫秒");
+                Console.WriteLine($"平均耗时: {queryAvgTime:F2} 毫秒");
+                Console.WriteLine($"最小耗时: {queryMinTime} 毫秒");
+                Console.WriteLine($"最大耗时: {queryMaxTime} 毫秒");
+
+                // 操作功能统计
+                double handleAvgTime = handleExecutionTimes.Average();
+                long handleMinTime = handleExecutionTimes.Min();
+                long handleMaxTime = handleExecutionTimes.Max();
+                long handleTotalTime = handleExecutionTimes.Sum();
+                Console.WriteLine("\n--- 操作功能耗时统计 ---");
+                Console.WriteLine($"总耗时: {handleTotalTime} 毫秒");
+                Console.WriteLine($"平均耗时: {handleAvgTime:F2} 毫秒");
+                Console.WriteLine($"最小耗时: {handleMinTime} 毫秒");
+                Console.WriteLine($"最大耗时: {handleMaxTime} 毫秒");
+
+                // 总耗时统计
+                double totalAvgTime = totalExecutionTimes.Average();
+                long totalMinTime = totalExecutionTimes.Min();
+                long totalMaxTime = totalExecutionTimes.Max();
+                long totalTime = totalExecutionTimes.Sum();
+                Console.WriteLine("\n--- 总耗时统计 ---");
+                Console.WriteLine($"总耗时: {totalTime} 毫秒");
+                Console.WriteLine($"平均耗时: {totalAvgTime:F2} 毫秒");
+                Console.WriteLine($"最小耗时: {totalMinTime} 毫秒");
+                Console.WriteLine($"最大耗时: {totalMaxTime} 毫秒");
+            }
+
+            WaitForKeyPress();
         }
     }
 }
