@@ -166,9 +166,7 @@ namespace Wincent
                 {ShellApplicationSetup}
                 $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')
 
-                Start-Sleep -Seconds 3
-
-                $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match ""Windows 11""
+                $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match 'Windows 11'
                 if ($isWin11) 
                 {{
                     $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')
