@@ -1,0 +1,60 @@
+name: Create Source Release
+
+on:
+  workflow_run:
+    workflows: ["Publish NuGet Package"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    runs-on: windows-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Extract version and release notes
+      id: extract_release_info
+      run: |
+        $content = Get-Content CHANGELOG.md -Raw
+        $versionMatch = [regex]::Match($content, '## \[(v\d+\.\d+\.\d+)\]')
+        $version = $versionMatch.Groups[1].Value
+        
+        $startIndex = $content.IndexOf("## [$version]")
+        $endIndex = $content.IndexOf("## [", $startIndex + 1)
+        
+        # Find the end of the version title line
+        $titleEndIndex = $content.IndexOf("`n", $startIndex)
+        if ($titleEndIndex -eq -1) {
+            $titleEndIndex = $content.Length
+        }
+        
+        if ($endIndex -eq -1) {
+            $releaseNotes = $content.Substring($titleEndIndex + 1)
+        } else {
+            $releaseNotes = $content.Substring($titleEndIndex + 1, $endIndex - $titleEndIndex - 1)
+        }
+        
+        $releaseNotes = $releaseNotes.Trim()
+        $releaseNotes = $releaseNotes -replace '```\w*', ''
+        $releaseNotes = $releaseNotes.Trim()
+        
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+        echo "release_notes<<EOF" >> $env:GITHUB_OUTPUT
+        echo "$releaseNotes" >> $env:GITHUB_OUTPUT
+        echo "EOF" >> $env:GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: Source Release ${{ steps.extract_release_info.outputs.version }}
+        body: ${{ steps.extract_release_info.outputs.release_notes }}
+        tag_name: ${{ steps.extract_release_info.outputs.version }}
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
