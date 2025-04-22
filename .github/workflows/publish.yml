@@ -21,6 +21,10 @@ jobs:
         nuget-version: '6.x'
     - run: nuget restore Wincent.sln
 
+    - name: Build Release
+      run: |
+        msbuild Wincent.sln /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin\Release
+
     - name: Get version from tag
       if: startsWith(github.ref, 'refs/tags/')
       id: get_version
@@ -36,7 +40,7 @@ jobs:
     - name: Pack NuGet package
       run: |
         cd Wincent
-        nuget pack
+        nuget pack -Properties Configuration=Release
 
     - name: Push to NuGet
       env:
