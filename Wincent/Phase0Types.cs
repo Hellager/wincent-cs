@@ -44,8 +44,8 @@ namespace Wincent
         /// Gets or sets whether matching Windows Recent shortcut files should be removed after shell removal.
         /// </summary>
         /// <remarks>
-        /// The option is part of the phase 0 public API. The actual deep cleanup behavior is implemented in a later
-        /// migration phase.
+        /// The cleanup enumerates Windows Recent folder shortcuts, resolves each shortcut target, and deletes shortcuts
+        /// whose target matches the removed item using Windows path comparison semantics.
         /// </remarks>
         public bool DeepCleanRecentLinks { get; set; }
     }

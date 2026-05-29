@@ -20,6 +20,7 @@ namespace TestWincent
         private Mock<IQuickAccessDataFiles> _dataFiles;
         private Mock<IQuickAccessNativeMutation> _nativeMutation;
         private Mock<IExplorerRefresher> _explorerRefresher;
+        private Mock<IRecentLinksCleaner> _recentLinksCleaner;
         private QuickAccessManager _manager;
 
         [TestInitialize]
@@ -31,6 +32,7 @@ namespace TestWincent
             _dataFiles = new Mock<IQuickAccessDataFiles>(MockBehavior.Strict);
             _nativeMutation = new Mock<IQuickAccessNativeMutation>(MockBehavior.Strict);
             _explorerRefresher = new Mock<IExplorerRefresher>(MockBehavior.Strict);
+            _recentLinksCleaner = new Mock<IRecentLinksCleaner>(MockBehavior.Strict);
 
             _executor.Setup(e => e.ExecutePSScriptWithCache(It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
                 .ReturnsAsync(new List<string>());
@@ -74,7 +76,8 @@ namespace TestWincent
                 RetryPolicy.Standard,
                 new PowerShellFallbackNativeQuery(),
                 _nativeMutation.Object,
-                _explorerRefresher.Object);
+                _explorerRefresher.Object,
+                _recentLinksCleaner.Object);
         }
 
         [TestCleanup]
@@ -314,6 +317,7 @@ namespace TestWincent
             _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles);
 
             _nativeMutation.Verify(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)), Times.Once);
+            _recentLinksCleaner.Verify(c => c.DeleteForTarget(It.IsAny<string>(), It.IsAny<TimeSpan>()), Times.Never);
             _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Never);
         }
 
@@ -345,11 +349,13 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void RemoveItem_DeepCleanRecentLinks_Phase0DoesNotAddSideEffects()
+        public void RemoveItem_DeepCleanRecentLinks_CleansRecentLinks()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\test.txt" });
             _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)));
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(@"C:\test.txt", TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\Users\Test\Recent\test.lnk" });
 
             _manager.RemoveItem(
                 @"C:\test.txt",
@@ -357,8 +363,27 @@ namespace TestWincent
                 new RemoveOptions { DeepCleanRecentLinks = true });
 
             _nativeMutation.Verify(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)), Times.Once);
+            _recentLinksCleaner.Verify(c => c.DeleteForTarget(@"C:\test.txt", TimeSpan.FromSeconds(10)), Times.Once);
             _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Never);
             _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Never);
+        }
+
+        [TestMethod]
+        public void RemoveItem_DeepCleanRecentLinks_CleanupFailurePropagatesAndClearsCache()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)));
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(@"C:\test.txt", TimeSpan.FromSeconds(10)))
+                .Throws(new IOException("delete failed"));
+
+            Assert.ThrowsException<IOException>(
+                () => _manager.RemoveItem(
+                    @"C:\test.txt",
+                    QuickAccess.RecentFiles,
+                    new RemoveOptions { DeepCleanRecentLinks = true }));
+
+            _executor.Verify(e => e.ClearCache(), Times.Once);
         }
 
         [TestMethod]
@@ -386,6 +411,23 @@ namespace TestWincent
 
             _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)), Times.Once);
             _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10), Times.Never);
+        }
+
+        [TestMethod]
+        public void RemoveItem_FrequentFolderWithDeepClean_CleansRecentLinks()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\Users\Test\Recent\Folder.lnk" });
+
+            _manager.RemoveItem(
+                @"C:\Folder",
+                QuickAccess.FrequentFolders,
+                new RemoveOptions { DeepCleanRecentLinks = true });
+
+            _recentLinksCleaner.Verify(c => c.DeleteForTarget(@"C:\Folder", TimeSpan.FromSeconds(10)), Times.Once);
         }
 
         [TestMethod]

@@ -120,6 +120,7 @@ namespace Wincent
         private readonly IQuickAccessNativeQuery _nativeQuery;
         private readonly IQuickAccessNativeMutation _nativeMutation;
         private readonly IExplorerRefresher _explorerRefresher;
+        private readonly IRecentLinksCleaner _recentLinksCleaner;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -145,7 +146,11 @@ namespace Wincent
                   options.RetryPolicy ?? RetryPolicy.Standard,
                   new ShellQuickAccessNativeQuery(new DefaultNativeMethods()),
                   new ShellQuickAccessNativeMutation(new DefaultNativeMethods()),
-                  new ShellExplorerRefresher(new DefaultNativeMethods()))
+                  new ShellExplorerRefresher(new DefaultNativeMethods()),
+                  new RecentLinksCleaner(
+                      new WindowsRecentFolder(new DefaultNativeMethods()),
+                      new ShellLinkTargetResolver(new DefaultNativeMethods()),
+                      new DefaultRecentLinkFileSystem()))
         {
         }
 
@@ -165,7 +170,8 @@ namespace Wincent
                   RetryPolicy.Standard,
                   new PowerShellFallbackNativeQuery(),
                   new PowerShellFallbackNativeMutation(),
-                  new PowerShellFallbackExplorerRefresher())
+                  new PowerShellFallbackExplorerRefresher(),
+                  new NoOpRecentLinksCleaner())
         {
         }
 
@@ -185,7 +191,8 @@ namespace Wincent
                   retryPolicy,
                   new PowerShellFallbackNativeQuery(),
                   new PowerShellFallbackNativeMutation(),
-                  new PowerShellFallbackExplorerRefresher())
+                  new PowerShellFallbackExplorerRefresher(),
+                  new NoOpRecentLinksCleaner())
         {
         }
 
@@ -206,7 +213,8 @@ namespace Wincent
                   retryPolicy,
                   nativeQuery,
                   new PowerShellFallbackNativeMutation(),
-                  new PowerShellFallbackExplorerRefresher())
+                  new PowerShellFallbackExplorerRefresher(),
+                  new NoOpRecentLinksCleaner())
         {
         }
 
@@ -228,7 +236,8 @@ namespace Wincent
                   retryPolicy,
                   nativeQuery,
                   nativeMutation,
-                  new PowerShellFallbackExplorerRefresher())
+                  new PowerShellFallbackExplorerRefresher(),
+                  new NoOpRecentLinksCleaner())
         {
         }
 
@@ -242,6 +251,31 @@ namespace Wincent
             IQuickAccessNativeQuery nativeQuery,
             IQuickAccessNativeMutation nativeMutation,
             IExplorerRefresher explorerRefresher)
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  nativeQuery,
+                  nativeMutation,
+                  explorerRefresher,
+                  new NoOpRecentLinksCleaner())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery,
+            IQuickAccessNativeMutation nativeMutation,
+            IExplorerRefresher explorerRefresher,
+            IRecentLinksCleaner recentLinksCleaner)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -255,6 +289,7 @@ namespace Wincent
             _nativeQuery = nativeQuery ?? throw new ArgumentNullException(nameof(nativeQuery));
             _nativeMutation = nativeMutation ?? throw new ArgumentNullException(nameof(nativeMutation));
             _explorerRefresher = explorerRefresher ?? throw new ArgumentNullException(nameof(explorerRefresher));
+            _recentLinksCleaner = recentLinksCleaner ?? throw new ArgumentNullException(nameof(recentLinksCleaner));
         }
 
         /// <summary>
@@ -402,8 +437,9 @@ namespace Wincent
         /// <exception cref="UnsupportedQuickAccessOperationException"><paramref name="target"/> is <see cref="QuickAccess.All"/>.</exception>
         /// <remarks>
         /// This method modifies the current Windows user's Quick Access state. Removal uses native Shell verbs first
-        /// and falls back to PowerShell only for native Shell failures. Deep cleanup of Recent shortcut files is reserved
-        /// for a later migration phase.
+        /// and falls back to PowerShell only for native Shell failures. When
+        /// <see cref="RemoveOptions.DeepCleanRecentLinks"/> is enabled, matching shortcut files in the Windows Recent
+        /// folder are deleted after the Shell removal succeeds.
         /// </remarks>
         public void RemoveItem(string path, QuickAccess target, RemoveOptions options)
         {
@@ -414,32 +450,43 @@ namespace Wincent
 
             EnsureSingleItemTarget(target, "RemoveItem");
 
-            if (target == QuickAccess.RecentFiles)
+            bool removed = false;
+            try
             {
-                ValidatePath(path, PathType.File, _fileSystem);
-                if (!ContainsItemExact(path, target))
-                    throw new QuickAccessItemNotFoundException(path, target);
+                if (target == QuickAccess.RecentFiles)
+                {
+                    ValidatePath(path, PathType.File, _fileSystem);
+                    if (!ContainsItemExact(path, target))
+                        throw new QuickAccessItemNotFoundException(path, target);
 
-                ExecuteNativeMutationWithPowerShellFallback(
-                    () => _nativeMutation.RemoveRecentFile(path, _timeout),
-                    PSScript.RemoveRecentFile,
-                    path,
-                    PowerShellOperation.RemoveRecentFile);
+                    ExecuteNativeMutationWithPowerShellFallback(
+                        () => _nativeMutation.RemoveRecentFile(path, _timeout),
+                        PSScript.RemoveRecentFile,
+                        path,
+                        PowerShellOperation.RemoveRecentFile);
+                }
+                else
+                {
+                    ValidatePath(path, PathType.Directory, _fileSystem);
+                    if (!ContainsItemExact(path, target))
+                        throw new QuickAccessItemNotFoundException(path, target);
+
+                    ExecuteNativeMutationWithPowerShellFallback(
+                        () => _nativeMutation.UnpinFrequentFolder(path, _timeout),
+                        PSScript.UnpinFromFrequentFolder,
+                        path,
+                        PowerShellOperation.UnpinFrequentFolder);
+                }
+
+                removed = true;
+                if (options.DeepCleanRecentLinks)
+                    _recentLinksCleaner.DeleteForTarget(path, _timeout);
             }
-            else
+            finally
             {
-                ValidatePath(path, PathType.Directory, _fileSystem);
-                if (!ContainsItemExact(path, target))
-                    throw new QuickAccessItemNotFoundException(path, target);
-
-                ExecuteNativeMutationWithPowerShellFallback(
-                    () => _nativeMutation.UnpinFrequentFolder(path, _timeout),
-                    PSScript.UnpinFromFrequentFolder,
-                    path,
-                    PowerShellOperation.UnpinFrequentFolder);
+                if (removed)
+                    _executor.ClearCache();
             }
-
-            _executor.ClearCache();
         }
 
         /// <summary>
