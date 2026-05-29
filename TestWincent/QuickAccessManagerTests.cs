@@ -18,6 +18,7 @@ namespace TestWincent
         private Mock<IFileSystemOperations> _fileSystem;
         private Mock<INativeMethods> _nativeMethods;
         private Mock<IQuickAccessDataFiles> _dataFiles;
+        private Mock<IQuickAccessNativeMutation> _nativeMutation;
         private QuickAccessManager _manager;
 
         [TestInitialize]
@@ -27,6 +28,7 @@ namespace TestWincent
             _fileSystem = new Mock<IFileSystemOperations>(MockBehavior.Strict);
             _nativeMethods = new Mock<INativeMethods>(MockBehavior.Strict);
             _dataFiles = new Mock<IQuickAccessDataFiles>(MockBehavior.Strict);
+            _nativeMutation = new Mock<IQuickAccessNativeMutation>(MockBehavior.Strict);
 
             _executor.Setup(e => e.ExecutePSScriptWithCache(It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
                 .ReturnsAsync(new List<string>());
@@ -66,7 +68,10 @@ namespace TestWincent
                 TimeSpan.FromSeconds(10),
                 _fileSystem.Object,
                 _nativeMethods.Object,
-                _dataFiles.Object);
+                _dataFiles.Object,
+                RetryPolicy.Standard,
+                new PowerShellFallbackNativeQuery(),
+                _nativeMutation.Object);
         }
 
         [TestCleanup]
@@ -244,10 +249,25 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void AddItem_FrequentFolder_UsesPinScript()
+        public void AddItem_FrequentFolder_UsesNativePin()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string>());
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
+
+            _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders);
+
+            _nativeMutation.Verify(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 10), Times.Never);
+        }
+
+        [TestMethod]
+        public void AddItem_FrequentFolder_NativeFailureFallsBackToPowerShell()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string>());
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native failed"));
 
             _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders);
 
@@ -282,10 +302,25 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void RemoveItem_RecentFile_UsesRemoveScript()
+        public void RemoveItem_RecentFile_UsesNativeRemove()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)));
+
+            _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles);
+
+            _nativeMutation.Verify(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Never);
+        }
+
+        [TestMethod]
+        public void RemoveItem_RecentFile_NativeFailureFallsBackToPowerShell()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native failed"));
 
             _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles);
 
@@ -293,17 +328,33 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void RemoveItem_RecentFile_NativeNotFoundDoesNotFallBack()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)))
+                .Throws(new QuickAccessItemNotFoundException(@"C:\test.txt", QuickAccess.RecentFiles));
+
+            Assert.ThrowsException<QuickAccessItemNotFoundException>(
+                () => _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles));
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Never);
+        }
+
+        [TestMethod]
         public void RemoveItem_DeepCleanRecentLinks_Phase0DoesNotAddSideEffects()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)));
 
             _manager.RemoveItem(
                 @"C:\test.txt",
                 QuickAccess.RecentFiles,
                 new RemoveOptions { DeepCleanRecentLinks = true });
 
-            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Once);
+            _nativeMutation.Verify(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Never);
             _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Never);
         }
 
@@ -313,10 +364,39 @@ namespace TestWincent
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native failed"));
             _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
                 .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.ProcessFailed, "err"));
 
             _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders);
+        }
+
+        [TestMethod]
+        public void RemoveItem_FrequentFolder_UsesNativeUnpin()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
+
+            _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders);
+
+            _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10), Times.Never);
+        }
+
+        [TestMethod]
+        public void RemoveItem_FrequentFolder_NativeNotFoundDoesNotFallBack()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new QuickAccessItemNotFoundException(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            Assert.ThrowsException<QuickAccessItemNotFoundException>(
+                () => _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10), Times.Never);
         }
 
         [TestMethod]

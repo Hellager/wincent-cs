@@ -118,6 +118,7 @@ namespace Wincent
         private readonly INativeMethods _nativeMethods;
         private readonly IQuickAccessDataFiles _dataFiles;
         private readonly IQuickAccessNativeQuery _nativeQuery;
+        private readonly IQuickAccessNativeMutation _nativeMutation;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -141,7 +142,8 @@ namespace Wincent
                   new DefaultNativeMethods(),
                   new QuickAccessDataFiles(),
                   options.RetryPolicy ?? RetryPolicy.Standard,
-                  new ShellQuickAccessNativeQuery(new DefaultNativeMethods()))
+                  new ShellQuickAccessNativeQuery(new DefaultNativeMethods()),
+                  new ShellQuickAccessNativeMutation(new DefaultNativeMethods()))
         {
         }
 
@@ -152,7 +154,15 @@ namespace Wincent
             INativeMethods nativeMethods,
             IQuickAccessDataFiles dataFiles)
             // Dependency-injected instances keep the legacy PowerShell query path unless a native seam is supplied.
-            : this(executor, timeout, fileSystem, nativeMethods, dataFiles, RetryPolicy.Standard, new PowerShellFallbackNativeQuery())
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  RetryPolicy.Standard,
+                  new PowerShellFallbackNativeQuery(),
+                  new PowerShellFallbackNativeMutation())
         {
         }
 
@@ -163,7 +173,15 @@ namespace Wincent
             INativeMethods nativeMethods,
             IQuickAccessDataFiles dataFiles,
             RetryPolicy retryPolicy)
-            : this(executor, timeout, fileSystem, nativeMethods, dataFiles, retryPolicy, new PowerShellFallbackNativeQuery())
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  new PowerShellFallbackNativeQuery(),
+                  new PowerShellFallbackNativeMutation())
         {
         }
 
@@ -175,6 +193,27 @@ namespace Wincent
             IQuickAccessDataFiles dataFiles,
             RetryPolicy retryPolicy,
             IQuickAccessNativeQuery nativeQuery)
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  nativeQuery,
+                  new PowerShellFallbackNativeMutation())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery,
+            IQuickAccessNativeMutation nativeMutation)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -186,6 +225,7 @@ namespace Wincent
             _dataFiles = dataFiles ?? throw new ArgumentNullException(nameof(dataFiles));
             _retryPolicy = retryPolicy ?? throw new ArgumentNullException(nameof(retryPolicy));
             _nativeQuery = nativeQuery ?? throw new ArgumentNullException(nameof(nativeQuery));
+            _nativeMutation = nativeMutation ?? throw new ArgumentNullException(nameof(nativeMutation));
         }
 
         /// <summary>
@@ -274,7 +314,8 @@ namespace Wincent
         /// <remarks>
         /// This method modifies the current Windows user's Quick Access state. When
         /// <see cref="AddOptions.RefreshRecentFiles"/> is enabled for recent files, the current Recent Files backing
-        /// data is removed to force Explorer to rebuild it.
+        /// data is removed to force Explorer to rebuild it. Frequent folders are pinned with a native Shell verb first
+        /// and fall back to PowerShell only when the native Shell operation fails.
         /// </remarks>
         public void AddItem(string path, QuickAccess target, AddOptions options)
         {
@@ -301,7 +342,11 @@ namespace Wincent
                 if (ContainsItemExact(path, target))
                     throw new QuickAccessItemAlreadyExistsException(path, target);
 
-                ExecuteMutationScript(PSScript.PinToFrequentFolder, path, PowerShellOperation.PinFrequentFolder);
+                ExecuteNativeMutationWithPowerShellFallback(
+                    () => _nativeMutation.PinFrequentFolder(path, _timeout),
+                    PSScript.PinToFrequentFolder,
+                    path,
+                    PowerShellOperation.PinFrequentFolder);
             }
 
             _executor.ClearCache();
@@ -327,8 +372,9 @@ namespace Wincent
         /// <exception cref="QuickAccessItemNotFoundException">The item is not present.</exception>
         /// <exception cref="UnsupportedQuickAccessOperationException"><paramref name="target"/> is <see cref="QuickAccess.All"/>.</exception>
         /// <remarks>
-        /// This method modifies the current Windows user's Quick Access state. Deep cleanup of Recent shortcut files is
-        /// reserved for a later migration phase.
+        /// This method modifies the current Windows user's Quick Access state. Removal uses native Shell verbs first
+        /// and falls back to PowerShell only for native Shell failures. Deep cleanup of Recent shortcut files is reserved
+        /// for a later migration phase.
         /// </remarks>
         public void RemoveItem(string path, QuickAccess target, RemoveOptions options)
         {
@@ -345,7 +391,11 @@ namespace Wincent
                 if (!ContainsItemExact(path, target))
                     throw new QuickAccessItemNotFoundException(path, target);
 
-                ExecuteMutationScript(PSScript.RemoveRecentFile, path, PowerShellOperation.RemoveRecentFile);
+                ExecuteNativeMutationWithPowerShellFallback(
+                    () => _nativeMutation.RemoveRecentFile(path, _timeout),
+                    PSScript.RemoveRecentFile,
+                    path,
+                    PowerShellOperation.RemoveRecentFile);
             }
             else
             {
@@ -353,7 +403,11 @@ namespace Wincent
                 if (!ContainsItemExact(path, target))
                     throw new QuickAccessItemNotFoundException(path, target);
 
-                ExecuteMutationScript(PSScript.UnpinFromFrequentFolder, path, PowerShellOperation.UnpinFrequentFolder);
+                ExecuteNativeMutationWithPowerShellFallback(
+                    () => _nativeMutation.UnpinFrequentFolder(path, _timeout),
+                    PSScript.UnpinFromFrequentFolder,
+                    path,
+                    PowerShellOperation.UnpinFrequentFolder);
             }
 
             _executor.ClearCache();
@@ -625,6 +679,37 @@ namespace Wincent
 
                     return true;
                 });
+        }
+
+        private void ExecuteNativeMutationWithPowerShellFallback(
+            Action nativeAction,
+            PSScript fallbackScript,
+            string parameter,
+            PowerShellOperation operation)
+        {
+            try
+            {
+                nativeAction();
+            }
+            catch (Exception ex) when (ShouldFallbackToPowerShell(ex))
+            {
+                ExecuteMutationScript(fallbackScript, parameter, operation);
+            }
+        }
+
+        private static bool ShouldFallbackToPowerShell(Exception exception)
+        {
+            if (exception is QuickAccessItemNotFoundException ||
+                exception is QuickAccessItemAlreadyExistsException ||
+                exception is UnsupportedQuickAccessOperationException ||
+                exception is ArgumentException ||
+                exception is FileNotFoundException ||
+                exception is DirectoryNotFoundException)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private T ExecuteWithRetry<T>(Func<T> action)
