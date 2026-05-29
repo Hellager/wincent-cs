@@ -301,18 +301,10 @@ namespace Wincent
             if (!_fileSystemService.FileExists(scriptPath))
                 throw new FileNotFoundException("Script file not found", scriptPath);
 
-            string arguments = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{scriptPath}\"";
-
-            // Add parameter to command line arguments if provided
-            if (!string.IsNullOrEmpty(parameter))
-            {
-                arguments += $" \"{parameter}\"";
-            }
-
             var startInfo = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = arguments,
+                Arguments = PowerShellCommandLine.BuildArguments(scriptPath, parameter),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -417,7 +409,11 @@ namespace Wincent
                         }
                     }
 
-                    return new ScriptResult(-1, output.ToString(), errorMessage);
+                    throw new ScriptExecutionException(
+                        $"PowerShell process failed: {ex.Message}",
+                        ex,
+                        output.ToString(),
+                        errorMessage);
                 }
             }
         }
@@ -476,6 +472,8 @@ namespace Wincent
                 {
                     result = await ExecutePSScript(method, para);
                 }
+
+                EnsureSuccess(method, para, result, null, timeoutSeconds);
                 return ParseScriptOutputToList(result.Output);
             }
 
@@ -506,13 +504,7 @@ namespace Wincent
                 scriptResult = await ExecutePSScript(method, para);
             }
 
-            if (scriptResult.ExitCode != 0)
-            {
-                throw new ScriptExecutionException(
-                    "Script execution failed with non-zero exit code",
-                    scriptResult.Output,
-                    scriptResult.Error);
-            }
+            EnsureSuccess(method, para, scriptResult, null, timeoutSeconds);
 
             var parsedResult = ParseScriptOutputToList(scriptResult.Output);
 
@@ -530,31 +522,14 @@ namespace Wincent
         /// <returns>Script execution result</returns>
         public async Task<ScriptResult> ExecutePSScript(PSScript method, string para)
         {
+            string scriptPath = null;
             try
             {
-                // Validate parameter
-                if (para != null)
-                {
-                    var isValid = FileOrDirectoryExists(para);
-                    if (!isValid)
-                    {
-                        throw new InvalidPathException(para, "File or directory does not exist");
-                    }
-                }
-
-                // Get script path
-                string scriptPath;
-                if (para != null && _scriptStorageService.IsParameterizedScript(method))
-                {
-                    scriptPath = _scriptStorageService.GetDynamicScriptPath(method, para);
-                }
-                else
-                {
-                    scriptPath = _scriptStorageService.GetScriptPath(method);
-                }
+                scriptPath = PrepareScriptPath(method, para);
 
                 // Execute without timeout
                 var result = await ExecuteCoreAsync(scriptPath, null, para);
+                EnsureSuccess(method, para, result, scriptPath, 0);
                 return result;
             }
             catch (InvalidPathException)
@@ -562,7 +537,7 @@ namespace Wincent
                 // Re-throw for caller handling
                 throw;
             }
-            catch (ScriptExecutionException)
+            catch (PowerShellExecutionException)
             {
                 // Re-throw for caller handling
                 throw;
@@ -572,10 +547,31 @@ namespace Wincent
                 // Re-throw for caller handling
                 throw;
             }
+            catch (ScriptExecutionException ex)
+            {
+                throw CreatePowerShellException(
+                    method,
+                    para,
+                    null,
+                    ex.Output,
+                    ex.Error,
+                    scriptPath,
+                    para,
+                    null,
+                    ex);
+            }
             catch (Exception ex)
             {
-                // Handle other exceptions
-                return new ScriptResult(-1, "", ex.Message);
+                throw CreatePowerShellException(
+                    method,
+                    para,
+                    null,
+                    string.Empty,
+                    ex.Message,
+                    scriptPath,
+                    para,
+                    null,
+                    ex);
             }
             finally
             {
@@ -596,28 +592,10 @@ namespace Wincent
         /// <returns>Script execution result</returns>
         public async Task<ScriptResult> ExecutePSScriptWithTimeout(PSScript method, string para, int timeoutSeconds)
         {
+            string scriptPath = null;
             try
             {
-                // Validate parameter
-                if (para != null)
-                {
-                    var isValid = FileOrDirectoryExists(para);
-                    if (!isValid)
-                    {
-                        throw new InvalidPathException(para, "File or directory does not exist");
-                    }
-                }
-
-                // Get script path
-                string scriptPath;
-                if (para != null && _scriptStorageService.IsParameterizedScript(method))
-                {
-                    scriptPath = _scriptStorageService.GetDynamicScriptPath(method, para);
-                }
-                else
-                {
-                    scriptPath = _scriptStorageService.GetScriptPath(method);
-                }
+                scriptPath = PrepareScriptPath(method, para);
 
                 // Set timeout duration
                 TimeSpan? timeout = null;
@@ -628,6 +606,7 @@ namespace Wincent
 
                 // Execute with timeout
                 var result = await ExecuteCoreAsync(scriptPath, timeout, para);
+                EnsureSuccess(method, para, result, scriptPath, timeoutSeconds);
                 return result;
             }
             catch (InvalidPathException)
@@ -637,18 +616,48 @@ namespace Wincent
             }
             catch (ScriptTimeoutException ex)
             {
-                // Return timeout result without throwing
-                return new ScriptResult(-1, ex.Output, $"Timeout: {ex.Message}");
+                throw CreatePowerShellException(
+                    method,
+                    para,
+                    null,
+                    ex.Output,
+                    $"Timeout: {ex.Message}",
+                    scriptPath,
+                    para,
+                    timeoutSeconds > 0 ? (TimeSpan?)TimeSpan.FromSeconds(timeoutSeconds) : null,
+                    ex,
+                    PowerShellErrorKind.Timeout);
             }
-            catch (ScriptExecutionException)
+            catch (ScriptExecutionException ex)
+            {
+                throw CreatePowerShellException(
+                    method,
+                    para,
+                    null,
+                    ex.Output,
+                    ex.Error,
+                    scriptPath,
+                    para,
+                    timeoutSeconds > 0 ? (TimeSpan?)TimeSpan.FromSeconds(timeoutSeconds) : null,
+                    ex);
+            }
+            catch (PowerShellExecutionException)
             {
                 // Re-throw for caller handling
                 throw;
             }
             catch (Exception ex)
             {
-                // Handle other exceptions
-                return new ScriptResult(-1, "", ex.Message);
+                throw CreatePowerShellException(
+                    method,
+                    para,
+                    null,
+                    string.Empty,
+                    ex.Message,
+                    scriptPath,
+                    para,
+                    timeoutSeconds > 0 ? (TimeSpan?)TimeSpan.FromSeconds(timeoutSeconds) : null,
+                    ex);
             }
             finally
             {
@@ -672,6 +681,66 @@ namespace Wincent
         {
             // Clean resources
             ClearCache();
+        }
+
+        private string PrepareScriptPath(PSScript method, string para)
+        {
+            // Validate parameter
+            if (para != null)
+            {
+                var isValid = FileOrDirectoryExists(para);
+                if (!isValid)
+                    throw new InvalidPathException(para, "File or directory does not exist");
+            }
+
+            if (para != null && _scriptStorageService.IsParameterizedScript(method))
+                return _scriptStorageService.GetDynamicScriptPath(method, para);
+
+            return _scriptStorageService.GetScriptPath(method);
+        }
+
+        private static void EnsureSuccess(PSScript method, string parameter, ScriptResult result, string scriptPath, int timeoutSeconds)
+        {
+            if (result.ExitCode == 0)
+                return;
+
+            throw CreatePowerShellException(
+                method,
+                parameter,
+                result.ExitCode,
+                result.Output,
+                result.Error,
+                scriptPath,
+                parameter,
+                timeoutSeconds > 0 ? (TimeSpan?)TimeSpan.FromSeconds(timeoutSeconds) : null,
+                null);
+        }
+
+        private static PowerShellExecutionException CreatePowerShellException(
+            PSScript method,
+            string parameter,
+            int? exitCode,
+            string output,
+            string error,
+            string scriptPath,
+            string parameters,
+            TimeSpan? duration,
+            Exception innerException,
+            PowerShellErrorKind? kindOverride = null)
+        {
+            var kind = kindOverride ?? PowerShellErrorClassifier.InferKind(innerException, error);
+
+            return new PowerShellExecutionException(
+                method.ToPowerShellOperation(),
+                kind,
+                exitCode,
+                output,
+                error,
+                scriptPath,
+                parameters,
+                duration,
+                PowerShellErrorClassifier.GetNativeErrorCode(innerException),
+                innerException);
         }
     }
 }

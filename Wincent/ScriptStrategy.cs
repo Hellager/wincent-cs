@@ -19,6 +19,36 @@ namespace Wincent
         CheckPinUnpinFeasible,
     }
 
+    internal static class PSScriptExtensions
+    {
+        public static PowerShellOperation ToPowerShellOperation(this PSScript script)
+        {
+            switch (script)
+            {
+                case PSScript.RefreshExplorer:
+                    return PowerShellOperation.RefreshExplorer;
+                case PSScript.QueryQuickAccess:
+                    return PowerShellOperation.QueryQuickAccess;
+                case PSScript.QueryRecentFile:
+                    return PowerShellOperation.QueryRecentFiles;
+                case PSScript.QueryFrequentFolder:
+                    return PowerShellOperation.QueryFrequentFolders;
+                case PSScript.AddRecentFile:
+                    return PowerShellOperation.AddRecentFile;
+                case PSScript.RemoveRecentFile:
+                    return PowerShellOperation.RemoveRecentFile;
+                case PSScript.PinToFrequentFolder:
+                    return PowerShellOperation.PinFrequentFolder;
+                case PSScript.UnpinFromFrequentFolder:
+                    return PowerShellOperation.UnpinFrequentFolder;
+                case PSScript.EmptyPinnedFolders:
+                    return PowerShellOperation.ClearPinnedFolders;
+                default:
+                    return PowerShellOperation.QueryQuickAccess;
+            }
+        }
+    }
+
     internal interface IPSScriptStrategy
     {
         string GenerateScript(string parameter);

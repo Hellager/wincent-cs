@@ -49,6 +49,7 @@
     <Compile Include="DestListTypes.cs" />
     <Compile Include="Infrastructure\ComGuard.cs" />
     <Compile Include="Infrastructure\NativeFileHandle.cs" />
+    <Compile Include="Infrastructure\PowerShellExecutionHelpers.cs" />
     <Compile Include="Infrastructure\StaThreadRunner.cs" />
     <Compile Include="Infrastructure\WindowsPathComparer.cs" />
     <Compile Include="Infrastructure\WindowsRecentFolder.cs" />

@@ -235,14 +235,83 @@ namespace TestWincent
 
         [TestMethod]
         [ExpectedException(typeof(PowerShellExecutionException))]
-        public void RemoveItem_NonZeroPowerShellExit_ThrowsPowerShellException()
+        public void RemoveItem_PowerShellFailure_ThrowsPowerShellExecutionException()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
             _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
-                .ReturnsAsync(new ScriptResult(1, "out", "err"));
+                .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.ProcessFailed, "err"));
 
             _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders);
+        }
+
+        [TestMethod]
+        public void RemoveItem_TransientPowerShellFailure_RetriesAndThenSucceeds()
+        {
+            _manager.Dispose();
+            _manager = new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false));
+
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _executor.SetupSequence(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.Timeout, "operation timed out"))
+                .ReturnsAsync(new ScriptResult(0, string.Empty, string.Empty));
+
+            _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders);
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10), Times.Exactly(2));
+        }
+
+        [TestMethod]
+        public void RemoveItem_PermanentPowerShellFailure_DoesNotRetry()
+        {
+            _manager.Dispose();
+            _manager = new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false));
+
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.AccessDenied, "Access is denied"));
+
+            Assert.ThrowsException<PowerShellExecutionException>(
+                () => _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void RemoveItem_RetryPolicyNone_DoesNotRetryTransientFailure()
+        {
+            _manager.Dispose();
+            _manager = new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                RetryPolicy.None);
+
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.Timeout, "operation timed out"));
+
+            Assert.ThrowsException<PowerShellExecutionException>(
+                () => _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10), Times.Once);
         }
 
         [TestMethod]
@@ -422,6 +491,23 @@ namespace TestWincent
 
             expected.Sort(StringComparer.Ordinal);
             CollectionAssert.AreEqual(expected, exported);
+        }
+
+        private static PowerShellExecutionException CreatePowerShellException(
+            PowerShellOperation operation,
+            PowerShellErrorKind kind,
+            string error)
+        {
+            return new PowerShellExecutionException(
+                operation,
+                kind,
+                null,
+                string.Empty,
+                error,
+                "test.ps1",
+                null,
+                TimeSpan.FromMilliseconds(1),
+                null);
         }
     }
 }

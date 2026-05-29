@@ -584,38 +584,52 @@ namespace Wincent
 
         private IReadOnlyList<string> ExecuteListScript(PSScript script, string parameter, int timeoutSeconds)
         {
-            try
-            {
-                return _executor.ExecutePSScriptWithCache(script, parameter, timeoutSeconds)
+            return ExecuteWithRetry(() =>
+                _executor.ExecutePSScriptWithCache(script, parameter, timeoutSeconds)
                     .GetAwaiter()
                     .GetResult()
-                    .AsReadOnly();
-            }
-            catch (ScriptExecutionException ex)
-            {
-                throw CreatePowerShellException(script, parameter, null, ex.Output, ex.Error, ex);
-            }
+                    .AsReadOnly());
         }
 
         private void ExecuteMutationScript(PSScript script, string parameter, PowerShellOperation operation)
         {
-            var result = _executor.ExecutePSScriptWithTimeout(script, parameter, ToTimeoutSeconds())
-                .GetAwaiter()
-                .GetResult();
+            ExecuteWithRetry(
+                () =>
+                {
+                    _executor.ExecutePSScriptWithTimeout(script, parameter, ToTimeoutSeconds())
+                        .GetAwaiter()
+                        .GetResult();
 
-            if (result.ExitCode != 0)
+                    return true;
+                });
+        }
+
+        private T ExecuteWithRetry<T>(Func<T> action)
+        {
+            for (int retryAttempt = 0; ; retryAttempt++)
             {
-                throw new PowerShellExecutionException(
-                    operation,
-                    PowerShellErrorKind.ProcessFailed,
-                    result.ExitCode,
-                    result.Output,
-                    result.Error,
-                    null,
-                    parameter,
-                    null,
-                    null);
+                try
+                {
+                    return action();
+                }
+                catch (PowerShellExecutionException ex) when (ShouldRetry(ex, retryAttempt))
+                {
+                    System.Threading.Thread.Sleep(_retryPolicy.GetDelay(retryAttempt));
+                }
             }
+        }
+
+        private bool ShouldRetry(PowerShellExecutionException exception, int retryAttempt)
+        {
+            if (_retryPolicy.MaxRetryCount == 0 || retryAttempt >= _retryPolicy.MaxRetryCount)
+                return false;
+
+            if (exception.Kind == PowerShellErrorKind.Timeout)
+                return true;
+
+            string stderr = exception.StandardError ?? string.Empty;
+            return stderr.IndexOf("locked", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   stderr.IndexOf("temporarily unavailable", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private PowerShellExecutionException CreatePowerShellException(
@@ -641,29 +655,7 @@ namespace Wincent
 
         private static PowerShellOperation MapPowerShellOperation(PSScript script)
         {
-            switch (script)
-            {
-                case PSScript.RefreshExplorer:
-                    return PowerShellOperation.RefreshExplorer;
-                case PSScript.QueryQuickAccess:
-                    return PowerShellOperation.QueryQuickAccess;
-                case PSScript.QueryRecentFile:
-                    return PowerShellOperation.QueryRecentFiles;
-                case PSScript.QueryFrequentFolder:
-                    return PowerShellOperation.QueryFrequentFolders;
-                case PSScript.AddRecentFile:
-                    return PowerShellOperation.AddRecentFile;
-                case PSScript.RemoveRecentFile:
-                    return PowerShellOperation.RemoveRecentFile;
-                case PSScript.PinToFrequentFolder:
-                    return PowerShellOperation.PinFrequentFolder;
-                case PSScript.UnpinFromFrequentFolder:
-                    return PowerShellOperation.UnpinFrequentFolder;
-                case PSScript.EmptyPinnedFolders:
-                    return PowerShellOperation.ClearPinnedFolders;
-                default:
-                    return PowerShellOperation.QueryQuickAccess;
-            }
+            return script.ToPowerShellOperation();
         }
 
         private int ToTimeoutSeconds()

@@ -174,18 +174,18 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public async Task ExecutePSScriptWithTimeout_Timeout_ReturnsTimeoutResult()
+        public async Task ExecutePSScriptWithTimeout_Timeout_ThrowsPowerShellExecutionException()
         {
             // 准备长时间运行的测试脚本
             string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Start-Sleep -Seconds 10; Write-Output '测试输出'; exit 0";
             File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
 
-            // 执行脚本并设置超时
-            var result = await _executor.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 1);
+            var exception = await Assert.ThrowsExceptionAsync<PowerShellExecutionException>(
+                () => _executor.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 1));
 
-            // 验证结果
-            Assert.AreEqual(-1, result.ExitCode);
-            Assert.IsTrue(result.Error.Contains("timeout"));
+            Assert.AreEqual(PowerShellOperation.RefreshExplorer, exception.Operation);
+            Assert.AreEqual(PowerShellErrorKind.Timeout, exception.Kind);
+            Assert.IsTrue(exception.StandardError.Contains("timeout"));
         }
 
         #endregion
@@ -228,6 +228,35 @@ namespace TestWincent
 
             // 非查询脚本不应该被缓存，但结果应该相同
             CollectionAssert.AreEqual(result1, result2);
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_QueryScriptNonZeroExit_ThrowsPowerShellExecutionException()
+        {
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Error 'Access is denied'; exit 1";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            var exception = await Assert.ThrowsExceptionAsync<PowerShellExecutionException>(
+                () => _executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null));
+
+            Assert.AreEqual(PowerShellOperation.QueryQuickAccess, exception.Operation);
+            Assert.AreEqual(PowerShellErrorKind.AccessDenied, exception.Kind);
+            Assert.AreEqual(1, exception.ExitCode);
+            Assert.IsTrue(exception.StandardError.Contains("Access is denied"));
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_NonQueryScriptNonZeroExit_ThrowsPowerShellExecutionException()
+        {
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Error 'CommandNotFoundException'; exit 1";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            var exception = await Assert.ThrowsExceptionAsync<PowerShellExecutionException>(
+                () => _executor.ExecutePSScriptWithCache(PSScript.RefreshExplorer, null));
+
+            Assert.AreEqual(PowerShellOperation.RefreshExplorer, exception.Operation);
+            Assert.AreEqual(PowerShellErrorKind.CmdletNotFound, exception.Kind);
+            Assert.AreEqual(1, exception.ExitCode);
         }
 
         [TestMethod]
