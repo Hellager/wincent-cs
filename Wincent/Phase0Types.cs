@@ -302,7 +302,7 @@ namespace Wincent
     }
 
     /// <summary>
-    /// Identifies a future Quick Access lock target.
+    /// Identifies a Quick Access lock target.
     /// </summary>
     public enum QuickAccessLockTarget
     {
@@ -323,7 +323,7 @@ namespace Wincent
     }
 
     /// <summary>
-    /// Configures a future unlock operation.
+    /// Configures an unlock operation.
     /// </summary>
     public sealed class QuickAccessUnlockOptions
     {
@@ -334,7 +334,7 @@ namespace Wincent
     }
 
     /// <summary>
-    /// Describes a future Quick Access unlock report.
+    /// Describes a Quick Access unlock report.
     /// </summary>
     public sealed class QuickAccessUnlockReport
     {
@@ -385,7 +385,7 @@ namespace Wincent
     }
 
     /// <summary>
-    /// Describes a failed future shortcut deletion.
+    /// Describes a failed shortcut deletion.
     /// </summary>
     public sealed class QuickAccessUnlockFailure
     {

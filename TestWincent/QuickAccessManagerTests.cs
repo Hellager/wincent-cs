@@ -869,6 +869,51 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void LockQuickAccess_UsesAllLockTarget()
+        {
+            var lockFactory = new Mock<IQuickAccessLockFactory>(MockBehavior.Strict);
+            var expected = CreateEmptyLock(QuickAccessLockTarget.All);
+            lockFactory.Setup(f => f.Lock(QuickAccessLockTarget.All)).Returns(expected);
+            _manager.Dispose();
+            _manager = CreateManager(lockFactory.Object);
+
+            var result = _manager.LockQuickAccess();
+
+            Assert.AreSame(expected, result);
+            lockFactory.Verify(f => f.Lock(QuickAccessLockTarget.All), Times.Once);
+        }
+
+        [TestMethod]
+        public void LockRecentFiles_UsesRecentFilesLockTarget()
+        {
+            var lockFactory = new Mock<IQuickAccessLockFactory>(MockBehavior.Strict);
+            var expected = CreateEmptyLock(QuickAccessLockTarget.RecentFiles);
+            lockFactory.Setup(f => f.Lock(QuickAccessLockTarget.RecentFiles)).Returns(expected);
+            _manager.Dispose();
+            _manager = CreateManager(lockFactory.Object);
+
+            var result = _manager.LockRecentFiles();
+
+            Assert.AreSame(expected, result);
+            lockFactory.Verify(f => f.Lock(QuickAccessLockTarget.RecentFiles), Times.Once);
+        }
+
+        [TestMethod]
+        public void LockFrequentFolders_UsesFrequentFoldersLockTarget()
+        {
+            var lockFactory = new Mock<IQuickAccessLockFactory>(MockBehavior.Strict);
+            var expected = CreateEmptyLock(QuickAccessLockTarget.FrequentFolders);
+            lockFactory.Setup(f => f.Lock(QuickAccessLockTarget.FrequentFolders)).Returns(expected);
+            _manager.Dispose();
+            _manager = CreateManager(lockFactory.Object);
+
+            var result = _manager.LockFrequentFolders();
+
+            Assert.AreSame(expected, result);
+            lockFactory.Verify(f => f.Lock(QuickAccessLockTarget.FrequentFolders), Times.Once);
+        }
+
+        [TestMethod]
         public void PublicApi_DoesNotExposeRemovedPhase0Surface()
         {
             var assembly = typeof(QuickAccessManager).Assembly;
@@ -876,7 +921,6 @@ namespace TestWincent
 
             Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Async", StringComparison.Ordinal)));
             Assert.IsFalse(managerMethods.Any(m => m.Name == "ClearCache"));
-            Assert.IsFalse(managerMethods.Any(m => m.Name.StartsWith("Lock", StringComparison.Ordinal)));
             Assert.IsFalse(managerMethods.Any(m => m.Name.Contains("Visible")));
             Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Metadata", StringComparison.Ordinal)));
             Assert.IsNull(assembly.GetType("Wincent.IQuickAccessManager"));
@@ -910,6 +954,7 @@ namespace TestWincent
                 "Wincent.QuickAccessItem",
                 "Wincent.QuickAccessItemAlreadyExistsException",
                 "Wincent.QuickAccessItemNotFoundException",
+                "Wincent.QuickAccessLock",
                 "Wincent.QuickAccessLockTarget",
                 "Wincent.QuickAccessManager",
                 "Wincent.QuickAccessManagerOptions",
@@ -960,6 +1005,32 @@ namespace TestWincent
                 _dataFiles.Object,
                 RetryPolicy.Standard,
                 nativeQuery);
+        }
+
+        private QuickAccessManager CreateManager(IQuickAccessLockFactory lockFactory)
+        {
+            return new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                RetryPolicy.Standard,
+                new PowerShellFallbackNativeQuery(),
+                _nativeMutation.Object,
+                _explorerRefresher.Object,
+                _recentLinksCleaner.Object,
+                lockFactory);
+        }
+
+        private static QuickAccessLock CreateEmptyLock(QuickAccessLockTarget target)
+        {
+            return new QuickAccessLock(
+                target,
+                string.Empty,
+                Array.Empty<string>(),
+                Array.Empty<IQuickAccessBackingFileHandle>(),
+                new DefaultRecentLinkFileSystem());
         }
     }
 }

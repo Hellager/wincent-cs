@@ -57,6 +57,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="QuickAccessDataFiles.cs" />
     <Compile Include="QuickAccessExplorerRefresher.cs" />
+    <Compile Include="QuickAccessLock.cs" />
     <Compile Include="QuickAccessManager.cs" />
     <Compile Include="QuickAccessNativeMutation.cs" />
     <Compile Include="QuickAccessNativeQuery.cs" />

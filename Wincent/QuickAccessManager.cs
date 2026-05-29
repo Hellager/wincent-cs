@@ -121,6 +121,7 @@ namespace Wincent
         private readonly IQuickAccessNativeMutation _nativeMutation;
         private readonly IExplorerRefresher _explorerRefresher;
         private readonly IRecentLinksCleaner _recentLinksCleaner;
+        private readonly IQuickAccessLockFactory _lockFactory;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -150,7 +151,13 @@ namespace Wincent
                   new RecentLinksCleaner(
                       new WindowsRecentFolder(new DefaultNativeMethods()),
                       new ShellLinkTargetResolver(new DefaultNativeMethods()),
-                      new DefaultRecentLinkFileSystem()))
+                      new DefaultRecentLinkFileSystem()),
+                  // Tech debt: consolidate default WindowsRecentFolder/QuickAccessDataFiles construction.
+                  new QuickAccessLockFactory(
+                      new QuickAccessDataFiles(),
+                      new WindowsRecentFolder(new DefaultNativeMethods()),
+                      new DefaultRecentLinkFileSystem(),
+                      new NativeQuickAccessBackingFileHandleOpener()))
         {
         }
 
@@ -171,7 +178,8 @@ namespace Wincent
                   new PowerShellFallbackNativeQuery(),
                   new PowerShellFallbackNativeMutation(),
                   new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner())
+                  new NoOpRecentLinksCleaner(),
+                  new NoOpQuickAccessLockFactory())
         {
         }
 
@@ -192,7 +200,8 @@ namespace Wincent
                   new PowerShellFallbackNativeQuery(),
                   new PowerShellFallbackNativeMutation(),
                   new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner())
+                  new NoOpRecentLinksCleaner(),
+                  new NoOpQuickAccessLockFactory())
         {
         }
 
@@ -214,7 +223,8 @@ namespace Wincent
                   nativeQuery,
                   new PowerShellFallbackNativeMutation(),
                   new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner())
+                  new NoOpRecentLinksCleaner(),
+                  new NoOpQuickAccessLockFactory())
         {
         }
 
@@ -237,7 +247,8 @@ namespace Wincent
                   nativeQuery,
                   nativeMutation,
                   new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner())
+                  new NoOpRecentLinksCleaner(),
+                  new NoOpQuickAccessLockFactory())
         {
         }
 
@@ -261,7 +272,8 @@ namespace Wincent
                   nativeQuery,
                   nativeMutation,
                   explorerRefresher,
-                  new NoOpRecentLinksCleaner())
+                  new NoOpRecentLinksCleaner(),
+                  new NoOpQuickAccessLockFactory())
         {
         }
 
@@ -276,6 +288,33 @@ namespace Wincent
             IQuickAccessNativeMutation nativeMutation,
             IExplorerRefresher explorerRefresher,
             IRecentLinksCleaner recentLinksCleaner)
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  nativeQuery,
+                  nativeMutation,
+                  explorerRefresher,
+                  recentLinksCleaner,
+                  new NoOpQuickAccessLockFactory())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery,
+            IQuickAccessNativeMutation nativeMutation,
+            IExplorerRefresher explorerRefresher,
+            IRecentLinksCleaner recentLinksCleaner,
+            IQuickAccessLockFactory lockFactory)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -290,6 +329,7 @@ namespace Wincent
             _nativeMutation = nativeMutation ?? throw new ArgumentNullException(nameof(nativeMutation));
             _explorerRefresher = explorerRefresher ?? throw new ArgumentNullException(nameof(explorerRefresher));
             _recentLinksCleaner = recentLinksCleaner ?? throw new ArgumentNullException(nameof(recentLinksCleaner));
+            _lockFactory = lockFactory ?? throw new ArgumentNullException(nameof(lockFactory));
         }
 
         /// <summary>
@@ -684,6 +724,44 @@ namespace Wincent
 
             if (options.RefreshExplorer)
                 RefreshExplorer();
+        }
+
+        /// <summary>
+        /// Locks both Quick Access backing files.
+        /// </summary>
+        /// <returns>A lock that must be released by calling <see cref="QuickAccessLock.Unlock()"/> or <see cref="QuickAccessLock.Dispose"/>.</returns>
+        /// <remarks>
+        /// This method opens the current Windows user's Recent Files and Frequent Folders backing files and keeps the
+        /// file handles alive until the returned lock is released.
+        /// </remarks>
+        public QuickAccessLock LockQuickAccess()
+        {
+            return _lockFactory.Lock(QuickAccessLockTarget.All);
+        }
+
+        /// <summary>
+        /// Locks the Recent Files backing file.
+        /// </summary>
+        /// <returns>A lock that must be released by calling <see cref="QuickAccessLock.Unlock()"/> or <see cref="QuickAccessLock.Dispose"/>.</returns>
+        /// <remarks>
+        /// The returned lock also records a Windows Recent shortcut snapshot for unlock reports and optional cleanup.
+        /// </remarks>
+        public QuickAccessLock LockRecentFiles()
+        {
+            return _lockFactory.Lock(QuickAccessLockTarget.RecentFiles);
+        }
+
+        /// <summary>
+        /// Locks the Frequent Folders backing file.
+        /// </summary>
+        /// <returns>A lock that must be released by calling <see cref="QuickAccessLock.Unlock()"/> or <see cref="QuickAccessLock.Dispose"/>.</returns>
+        /// <remarks>
+        /// The returned lock records a Windows Recent shortcut snapshot for unlock reports even though the backing file
+        /// being locked is the Frequent Folders data file.
+        /// </remarks>
+        public QuickAccessLock LockFrequentFolders()
+        {
+            return _lockFactory.Lock(QuickAccessLockTarget.FrequentFolders);
         }
 
         /// <summary>
