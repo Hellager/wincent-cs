@@ -119,6 +119,7 @@ namespace Wincent
         private readonly IQuickAccessDataFiles _dataFiles;
         private readonly IQuickAccessNativeQuery _nativeQuery;
         private readonly IQuickAccessNativeMutation _nativeMutation;
+        private readonly IExplorerRefresher _explorerRefresher;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -143,7 +144,8 @@ namespace Wincent
                   new QuickAccessDataFiles(),
                   options.RetryPolicy ?? RetryPolicy.Standard,
                   new ShellQuickAccessNativeQuery(new DefaultNativeMethods()),
-                  new ShellQuickAccessNativeMutation(new DefaultNativeMethods()))
+                  new ShellQuickAccessNativeMutation(new DefaultNativeMethods()),
+                  new ShellExplorerRefresher(new DefaultNativeMethods()))
         {
         }
 
@@ -162,7 +164,8 @@ namespace Wincent
                   dataFiles,
                   RetryPolicy.Standard,
                   new PowerShellFallbackNativeQuery(),
-                  new PowerShellFallbackNativeMutation())
+                  new PowerShellFallbackNativeMutation(),
+                  new PowerShellFallbackExplorerRefresher())
         {
         }
 
@@ -181,7 +184,8 @@ namespace Wincent
                   dataFiles,
                   retryPolicy,
                   new PowerShellFallbackNativeQuery(),
-                  new PowerShellFallbackNativeMutation())
+                  new PowerShellFallbackNativeMutation(),
+                  new PowerShellFallbackExplorerRefresher())
         {
         }
 
@@ -201,7 +205,8 @@ namespace Wincent
                   dataFiles,
                   retryPolicy,
                   nativeQuery,
-                  new PowerShellFallbackNativeMutation())
+                  new PowerShellFallbackNativeMutation(),
+                  new PowerShellFallbackExplorerRefresher())
         {
         }
 
@@ -214,6 +219,29 @@ namespace Wincent
             RetryPolicy retryPolicy,
             IQuickAccessNativeQuery nativeQuery,
             IQuickAccessNativeMutation nativeMutation)
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  nativeQuery,
+                  nativeMutation,
+                  new PowerShellFallbackExplorerRefresher())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery,
+            IQuickAccessNativeMutation nativeMutation,
+            IExplorerRefresher explorerRefresher)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -226,6 +254,7 @@ namespace Wincent
             _retryPolicy = retryPolicy ?? throw new ArgumentNullException(nameof(retryPolicy));
             _nativeQuery = nativeQuery ?? throw new ArgumentNullException(nameof(nativeQuery));
             _nativeMutation = nativeMutation ?? throw new ArgumentNullException(nameof(nativeMutation));
+            _explorerRefresher = explorerRefresher ?? throw new ArgumentNullException(nameof(explorerRefresher));
         }
 
         /// <summary>
@@ -525,10 +554,11 @@ namespace Wincent
         /// <param name="target">The section to clear.</param>
         /// <param name="options">The clear options.</param>
         /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
-        /// <exception cref="PartialClearException">Only part of <see cref="QuickAccess.All"/> was cleared.</exception>
+        /// <exception cref="PartialClearException">The clear operation only partially succeeds.</exception>
         /// <remarks>
-        /// This method modifies the current Windows user's Quick Access state. Explorer refresh uses the current
-        /// PowerShell fallback; native refresh is planned for a later migration phase.
+        /// This method modifies the current Windows user's Quick Access state. Explorer refresh uses a native Shell
+        /// refresh first and falls back to PowerShell when the native refresh fails. Refresh failures are propagated only
+        /// after a fully successful clear; partial clear errors preserve the original clear failure.
         /// </remarks>
         public void ClearItems(QuickAccess target, ClearOptions options)
         {
@@ -540,6 +570,7 @@ namespace Wincent
             bool recentCleared = false;
             bool frequentCleared = false;
             Exception firstError = null;
+            PartialClearException partialError = null;
 
             if (target == QuickAccess.RecentFiles || target == QuickAccess.All)
             {
@@ -551,8 +582,6 @@ namespace Wincent
                 catch (Exception ex)
                 {
                     firstError = firstError ?? ex;
-                    if (target != QuickAccess.All)
-                        throw;
                 }
             }
 
@@ -563,24 +592,39 @@ namespace Wincent
                     ClearFrequentFolders(options.RemovePinnedFolders);
                     frequentCleared = true;
                 }
+                catch (PartialClearException ex)
+                {
+                    frequentCleared |= ex.FrequentFoldersCleared;
+                    partialError = partialError ?? ex;
+                    firstError = firstError ?? ex.InnerException ?? ex;
+                }
                 catch (Exception ex)
                 {
                     firstError = firstError ?? ex;
-                    if (target != QuickAccess.All)
-                        throw;
                 }
             }
 
-            _executor.ClearCache();
+            if (recentCleared || frequentCleared || firstError == null)
+                _executor.ClearCache();
 
-            if (target == QuickAccess.All && firstError != null)
+            if (firstError != null)
             {
-                TryRefreshExplorer(options.RefreshExplorer);
-                throw new PartialClearException(recentCleared, frequentCleared, firstError);
+                bool hasPartialProgress = partialError != null ||
+                                          target == QuickAccess.All && (recentCleared || frequentCleared);
+                if (hasPartialProgress)
+                    TryRefreshExplorer(options.RefreshExplorer);
+
+                if (partialError != null && target != QuickAccess.All)
+                    throw partialError;
+
+                if (target == QuickAccess.All)
+                    throw new PartialClearException(recentCleared, frequentCleared, firstError);
+
+                throw firstError;
             }
 
             if (options.RefreshExplorer)
-                ExecuteMutationScript(PSScript.RefreshExplorer, null, PowerShellOperation.RefreshExplorer);
+                RefreshExplorer();
         }
 
         /// <summary>
@@ -800,17 +844,22 @@ namespace Wincent
 
         private void ClearFrequentFolders(bool removePinnedFolders)
         {
-            var recentFolder = new WindowsRecentFolder(_nativeMethods, _fileSystem).GetPath();
-            var jumpListFile = Path.Combine(
-                recentFolder,
-                "AutomaticDestinations",
-                "f01b4d95cf55d32a.automaticDestinations-ms");
+            var jumpListFile = _dataFiles.FrequentFoldersPath;
 
             if (_fileSystem.FileExists(jumpListFile))
                 _fileSystem.DeleteFile(jumpListFile);
 
             if (removePinnedFolders)
-                ExecuteMutationScript(PSScript.EmptyPinnedFolders, null, PowerShellOperation.ClearPinnedFolders);
+            {
+                try
+                {
+                    ExecuteMutationScript(PSScript.EmptyPinnedFolders, null, PowerShellOperation.ClearPinnedFolders);
+                }
+                catch (Exception ex)
+                {
+                    throw new PartialClearException(false, true, ex);
+                }
+            }
         }
 
         private void TryRefreshExplorer(bool shouldRefresh)
@@ -820,11 +869,23 @@ namespace Wincent
 
             try
             {
-                ExecuteMutationScript(PSScript.RefreshExplorer, null, PowerShellOperation.RefreshExplorer);
+                RefreshExplorer();
             }
             catch
             {
                 // Partial clear preserves the original failure.
+            }
+        }
+
+        private void RefreshExplorer()
+        {
+            try
+            {
+                _explorerRefresher.Refresh(_timeout);
+            }
+            catch (Exception)
+            {
+                ExecuteMutationScript(PSScript.RefreshExplorer, null, PowerShellOperation.RefreshExplorer);
             }
         }
     }

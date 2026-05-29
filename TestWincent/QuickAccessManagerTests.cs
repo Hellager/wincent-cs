@@ -19,6 +19,7 @@ namespace TestWincent
         private Mock<INativeMethods> _nativeMethods;
         private Mock<IQuickAccessDataFiles> _dataFiles;
         private Mock<IQuickAccessNativeMutation> _nativeMutation;
+        private Mock<IExplorerRefresher> _explorerRefresher;
         private QuickAccessManager _manager;
 
         [TestInitialize]
@@ -29,6 +30,7 @@ namespace TestWincent
             _nativeMethods = new Mock<INativeMethods>(MockBehavior.Strict);
             _dataFiles = new Mock<IQuickAccessDataFiles>(MockBehavior.Strict);
             _nativeMutation = new Mock<IQuickAccessNativeMutation>(MockBehavior.Strict);
+            _explorerRefresher = new Mock<IExplorerRefresher>(MockBehavior.Strict);
 
             _executor.Setup(e => e.ExecutePSScriptWithCache(It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
                 .ReturnsAsync(new List<string>());
@@ -71,7 +73,8 @@ namespace TestWincent
                 _dataFiles.Object,
                 RetryPolicy.Standard,
                 new PowerShellFallbackNativeQuery(),
-                _nativeMutation.Object);
+                _nativeMutation.Object,
+                _explorerRefresher.Object);
         }
 
         [TestCleanup]
@@ -518,15 +521,41 @@ namespace TestWincent
         {
             _manager.ClearItems(QuickAccess.FrequentFolders);
 
-            _fileSystem.Verify(f => f.DeleteFile(It.Is<string>(p => p.EndsWith("f01b4d95cf55d32a.automaticDestinations-ms"))), Times.Once);
+            _fileSystem.Verify(f => f.DeleteFile(@"C:\frequent.automaticDestinations-ms"), Times.Once);
         }
 
         [TestMethod]
-        public void ClearItems_WithRefresh_RefreshesExplorer()
+        public void ClearItems_WithRefresh_UsesNativeExplorerRefresh()
         {
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+
+            _manager.ClearItems(QuickAccess.RecentFiles, new ClearOptions { RefreshExplorer = true });
+
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10), Times.Never);
+        }
+
+        [TestMethod]
+        public void ClearItems_WithRefresh_NativeRefreshFailureFallsBackToPowerShell()
+        {
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+
             _manager.ClearItems(QuickAccess.RecentFiles, new ClearOptions { RefreshExplorer = true });
 
             _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_WithRefresh_AllRefreshPathsFail_ThrowsPowerShellException()
+        {
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+
+            Assert.ThrowsException<PowerShellExecutionException>(
+                () => _manager.ClearItems(QuickAccess.RecentFiles, new ClearOptions { RefreshExplorer = true }));
         }
 
         [TestMethod]
@@ -538,6 +567,64 @@ namespace TestWincent
             try
             {
                 _manager.ClearItems(QuickAccess.All);
+                Assert.Fail("Expected PartialClearException.");
+            }
+            catch (PartialClearException ex)
+            {
+                Assert.IsFalse(ex.RecentFilesCleared);
+                Assert.IsTrue(ex.FrequentFoldersCleared);
+            }
+        }
+
+        [TestMethod]
+        public void ClearItems_FrequentFoldersPinnedCleanupFailure_ReportsFrequentProgress()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.ClearPinnedFolders, PowerShellErrorKind.ProcessFailed, "unpin failed"));
+
+            try
+            {
+                _manager.ClearItems(QuickAccess.FrequentFolders, new ClearOptions { RemovePinnedFolders = true });
+                Assert.Fail("Expected PartialClearException.");
+            }
+            catch (PartialClearException ex)
+            {
+                Assert.IsFalse(ex.RecentFilesCleared);
+                Assert.IsTrue(ex.FrequentFoldersCleared);
+            }
+        }
+
+        [TestMethod]
+        public void ClearItems_AllFrequentPartialFailure_MergesProgressFlags()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.ClearPinnedFolders, PowerShellErrorKind.ProcessFailed, "unpin failed"));
+
+            try
+            {
+                _manager.ClearItems(QuickAccess.All, new ClearOptions { RemovePinnedFolders = true });
+                Assert.Fail("Expected PartialClearException.");
+            }
+            catch (PartialClearException ex)
+            {
+                Assert.IsTrue(ex.RecentFilesCleared);
+                Assert.IsTrue(ex.FrequentFoldersCleared);
+            }
+        }
+
+        [TestMethod]
+        public void ClearItems_PartialFailureWithRefresh_PreservesPartialClearException()
+        {
+            _nativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>()))
+                .Throws(new Win32Exception(1));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+
+            try
+            {
+                _manager.ClearItems(QuickAccess.All, new ClearOptions { RefreshExplorer = true });
                 Assert.Fail("Expected PartialClearException.");
             }
             catch (PartialClearException ex)

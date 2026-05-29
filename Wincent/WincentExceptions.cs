@@ -142,7 +142,7 @@ namespace Wincent
     }
 
     /// <summary>
-    /// Thrown when clearing all sections only partially succeeds.
+    /// Thrown when a clear operation only partially succeeds.
     /// </summary>
     public sealed class PartialClearException : WincentException
     {

@@ -63,6 +63,10 @@ namespace Wincent
         /// <summary>
         /// Gets or sets whether Explorer windows should be refreshed after a successful clear.
         /// </summary>
+        /// <remarks>
+        /// A fully successful clear propagates refresh failures after the native Shell refresh and PowerShell fallback
+        /// both fail. A partial clear treats refresh as best-effort and preserves the original clear failure.
+        /// </remarks>
         public bool RefreshExplorer { get; set; }
     }
 
