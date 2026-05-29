@@ -6,7 +6,7 @@ namespace Wincent
     /// <summary>
     /// File system operations interface for dependency injection and unit testing
     /// </summary>
-    public interface IFileSystem
+    internal interface IFileSystem
     {
         bool FileExists(string path);
         void DeleteFile(string path);
@@ -16,7 +16,7 @@ namespace Wincent
     /// <summary>
     /// Implementation of real file system operations
     /// </summary>
-    public class RealFileSystem : IFileSystem
+    internal class RealFileSystem : IFileSystem
     {
         public bool FileExists(string path)
         {
@@ -37,7 +37,7 @@ namespace Wincent
     /// <summary>
     /// Quick Access data files management interface
     /// </summary>
-    public interface IQuickAccessDataFiles
+    internal interface IQuickAccessDataFiles
     {
         /// <summary>
         /// Gets modification time for script-related data file
@@ -65,7 +65,7 @@ namespace Wincent
     /// <summary>
     /// Windows Quick Access data file management
     /// </summary>
-    public class QuickAccessDataFiles : IQuickAccessDataFiles
+    internal class QuickAccessDataFiles : IQuickAccessDataFiles
     {
         private readonly string _recentFilesPath;
         private readonly string _frequentFoldersPath;

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace Wincent
 {
-    public enum PSScript
+    internal enum PSScript
     {
         RefreshExplorer,
         QueryQuickAccess,
@@ -19,12 +19,12 @@ namespace Wincent
         CheckPinUnpinFeasible,
     }
 
-    public interface IPSScriptStrategy
+    internal interface IPSScriptStrategy
     {
         string GenerateScript(string parameter);
     }
 
-    public abstract class PSScriptStrategyBase : IPSScriptStrategy
+    internal abstract class PSScriptStrategyBase : IPSScriptStrategy
     {
         protected const string EncodingSetup = @"
             $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
@@ -98,13 +98,13 @@ namespace Wincent
         public abstract string GenerateScript(string parameter);
     }
 
-    public static class ShellNamespaces
+    internal static class ShellNamespaces
     {
         public const string QuickAccess = "shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}";
         public const string FrequentFolders = "shell:::{3936E9E4-D92C-4EEE-A85A-BC16D5EA0819}";
     }
 
-    public class RefreshExplorerStrategy : PSScriptStrategyBase
+    internal class RefreshExplorerStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
@@ -114,7 +114,7 @@ namespace Wincent
         ";
     }
 
-    public class QueryRecentFileStrategy : PSScriptStrategyBase
+    internal class QueryRecentFileStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
@@ -125,7 +125,7 @@ namespace Wincent
         ";
     }
 
-    public class QueryFrequentFolderStrategy : PSScriptStrategyBase
+    internal class QueryFrequentFolderStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
@@ -135,7 +135,7 @@ namespace Wincent
         ";
     }
 
-    public class QueryQuickAccessStrategy : PSScriptStrategyBase
+    internal class QueryQuickAccessStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
@@ -145,7 +145,7 @@ namespace Wincent
         ";
     }
 
-    public class CheckQueryFeasibleStrategy : PSScriptStrategyBase
+    internal class CheckQueryFeasibleStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
@@ -157,7 +157,7 @@ namespace Wincent
         ";
     }
 
-    public class CheckPinUnpinFeasibleStrategy : PSScriptStrategyBase
+    internal class CheckPinUnpinFeasibleStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
@@ -181,7 +181,7 @@ namespace Wincent
         ";
     }
 
-    public class AddRecentFileStrategy : PSScriptStrategyBase
+    internal class AddRecentFileStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter)
         {
@@ -198,7 +198,7 @@ namespace Wincent
         }
     }
 
-    public class RemoveRecentFileStrategy : PSScriptStrategyBase
+    internal class RemoveRecentFileStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter)
         {
@@ -218,7 +218,7 @@ namespace Wincent
         }
     }
 
-    public class PinToFrequentFolderStrategy : PSScriptStrategyBase
+    internal class PinToFrequentFolderStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter)
         {
@@ -235,7 +235,7 @@ namespace Wincent
         }
     }
 
-    public class UnpinFromFrequentFolderStrategy : PSScriptStrategyBase
+    internal class UnpinFromFrequentFolderStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter)
         {
@@ -264,7 +264,7 @@ namespace Wincent
         }
     }   
 
-    public class EmptyPinnedFoldersStrategy : PSScriptStrategyBase
+    internal class EmptyPinnedFoldersStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter) => $@"
             {EncodingSetup}
@@ -274,13 +274,13 @@ namespace Wincent
         ";
     }
 
-    public interface IPSScriptStrategyFactory
+    internal interface IPSScriptStrategyFactory
     {
         IPSScriptStrategy GetStrategy(PSScript method);
     }
 
 
-    public class DefaultPSScriptStrategyFactory : IPSScriptStrategyFactory
+    internal class DefaultPSScriptStrategyFactory : IPSScriptStrategyFactory
     {
         private static readonly IReadOnlyDictionary<PSScript, Func<IPSScriptStrategy>> _strategyMap =
             new Dictionary<PSScript, Func<IPSScriptStrategy>>
@@ -307,7 +307,7 @@ namespace Wincent
         }
     }
 
-    public class ScriptGenerationException : Exception
+    internal class ScriptGenerationException : Exception
     {
         public ScriptGenerationException(string message, Exception inner)
             : base(message, inner) { }

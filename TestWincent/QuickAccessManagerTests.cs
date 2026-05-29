@@ -1,610 +1,370 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
-using Wincent;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using System.Security;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using Wincent;
 
 namespace TestWincent
 {
     [TestClass]
     public class QuickAccessManagerTests
     {
-        private Mock<IScriptExecutor> _mockExecutor;
-        private Mock<IFileSystemOperations> _mockFileSystem;
-        private Mock<INativeMethods> _mockNativeMethods;
-        private Mock<IQuickAccessDataFiles> _mockDataFiles;
-        private IQuickAccessManager _manager;
-        private readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
+        private Mock<IScriptExecutor> _executor;
+        private Mock<IFileSystemOperations> _fileSystem;
+        private Mock<INativeMethods> _nativeMethods;
+        private Mock<IQuickAccessDataFiles> _dataFiles;
+        private QuickAccessManager _manager;
 
         [TestInitialize]
-        public void Setup()
+        public void SetUp()
         {
-            // 创建测试双对象
-            _mockExecutor = new Mock<IScriptExecutor>(MockBehavior.Strict);
-            _mockFileSystem = new Mock<IFileSystemOperations>(MockBehavior.Strict);
-            _mockNativeMethods = new Mock<INativeMethods>(MockBehavior.Strict);
-            _mockDataFiles = new Mock<IQuickAccessDataFiles>(MockBehavior.Strict);
+            _executor = new Mock<IScriptExecutor>(MockBehavior.Strict);
+            _fileSystem = new Mock<IFileSystemOperations>(MockBehavior.Strict);
+            _nativeMethods = new Mock<INativeMethods>(MockBehavior.Strict);
+            _dataFiles = new Mock<IQuickAccessDataFiles>(MockBehavior.Strict);
 
-            // 设置默认行为
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
+            _executor.Setup(e => e.ExecutePSScriptWithCache(It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
                 .ReturnsAsync(new List<string>());
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
+                .ReturnsAsync(new ScriptResult(0, string.Empty, string.Empty));
+            _executor.Setup(e => e.ClearCache());
+            _executor.Setup(e => e.Dispose());
 
-            _mockExecutor.Setup(e => e.ExecutePSScript(It.IsAny<PSScript>(), It.IsAny<string>()))
-                .ReturnsAsync(new ScriptResult(0, "", ""));
+            _fileSystem.Setup(f => f.FileExists(It.IsAny<string>())).Returns(true);
+            _fileSystem.Setup(f => f.DirectoryExists(It.IsAny<string>())).Returns(true);
+            _fileSystem.Setup(f => f.DeleteFile(It.IsAny<string>()));
 
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithTimeout(It.IsAny<PSScript>(), It.IsAny<string>(), It.IsAny<int>()))
-                .ReturnsAsync(new ScriptResult(0, "", ""));
+            _nativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>())).Returns(0);
+            _nativeMethods.Setup(n => n.CoUninitialize());
+            _nativeMethods.Setup(n => n.SHAddToRecentDocs(It.IsAny<uint>(), It.IsAny<IntPtr>()));
+            _nativeMethods.Setup(n => n.CoTaskMemFree(It.IsAny<IntPtr>()));
 
-            _mockExecutor.Setup(e => e.ClearCache()).Verifiable();
-
-            _mockExecutor.Setup(e => e.Dispose()).Verifiable();
-
-            // 文件系统模拟
-            _mockFileSystem.Setup(fs => fs.FileExists(It.IsAny<string>())).Returns(true);
-            _mockFileSystem.Setup(fs => fs.DirectoryExists(It.IsAny<string>())).Returns(true);
-            _mockFileSystem.Setup(fs => fs.DeleteFile(It.IsAny<string>())).Verifiable();
-
-            // 原生方法模拟
-            _mockNativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>())).Returns(0);
-            _mockNativeMethods.Setup(n => n.SHAddToRecentDocs(It.IsAny<uint>(), It.IsAny<IntPtr>())).Verifiable();
-            _mockNativeMethods.Setup(n => n.CoUninitialize()).Verifiable();
-
-            // 修复 SHGetKnownFolderPath 的模拟
-            IntPtr dummyPath = Marshal.StringToHGlobalUni(@"C:\Users\Test\AppData\Recent");
-            _mockNativeMethods.Setup(n => n.SHGetKnownFolderPath(
-                It.IsAny<Guid>(),
-                It.IsAny<uint>(),
-                It.IsAny<IntPtr>(),
-                out It.Ref<IntPtr>.IsAny))
-                .Callback(new SHGetKnownFolderPathCallback((Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath) =>
+            IntPtr recentFolder = Marshal.StringToHGlobalUni(@"C:\Users\Test\AppData\Roaming\Microsoft\Windows\Recent");
+            _nativeMethods.Setup(n => n.SHGetKnownFolderPath(
+                    It.IsAny<Guid>(),
+                    It.IsAny<uint>(),
+                    It.IsAny<IntPtr>(),
+                    out It.Ref<IntPtr>.IsAny))
+                .Callback(new SHGetKnownFolderPathCallback((Guid id, uint flags, IntPtr token, out IntPtr path) =>
                 {
-                    ppszPath = dummyPath;
+                    path = recentFolder;
                 }))
                 .Returns(0);
 
-            _mockNativeMethods.Setup(n => n.CoTaskMemFree(It.IsAny<IntPtr>())).Verifiable();
+            _dataFiles.Setup(d => d.RemoveRecentFile());
+            _dataFiles.Setup(d => d.GetModifiedTimeForScript(It.IsAny<PSScript>())).Returns(DateTime.Now);
+            _dataFiles.Setup(d => d.RecentFilesPath).Returns(@"C:\recent.automaticDestinations-ms");
+            _dataFiles.Setup(d => d.FrequentFoldersPath).Returns(@"C:\frequent.automaticDestinations-ms");
 
-            // 数据文件模拟
-            _mockDataFiles.Setup(d => d.RemoveRecentFile()).Verifiable();
-            _mockDataFiles.Setup(d => d.GetModifiedTimeForScript(It.IsAny<PSScript>())).Returns(DateTime.Now);
-
-            // 设置数据文件路径属性
-            _mockDataFiles.Setup(d => d.RecentFilesPath).Returns(@"C:\Users\Test\AppData\Recent\TestRecent.dat");
-            _mockDataFiles.Setup(d => d.FrequentFoldersPath).Returns(@"C:\Users\Test\AppData\Recent\TestFrequent.dat");
-
-            // 创建QuickAccessManager实例
             _manager = new QuickAccessManager(
-                _mockExecutor.Object,
-                _timeout,
-                _mockFileSystem.Object,
-                _mockNativeMethods.Object,
-                _mockDataFiles.Object);
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object);
         }
 
-        // 为了模拟带有 out 参数的方法而定义的委托类型
+        [TestCleanup]
+        public void CleanUp()
+        {
+            _manager.Dispose();
+        }
+
         private delegate void SHGetKnownFolderPathCallback(Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
 
-        [TestCleanup]
-        public void Cleanup()
+        [TestMethod]
+        public void GetItems_All_UsesQuickAccessQuery()
         {
-            if (_manager != null)
+            var expected = new List<string> { @"C:\a.txt", @"C:\folder" };
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10))
+                .ReturnsAsync(expected);
+
+            var result = _manager.GetItems(QuickAccess.All);
+
+            CollectionAssert.AreEqual(expected, result.ToList());
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void QuickAccess_EnumValues_PreserveLegacyNumericValues()
+        {
+            Assert.AreEqual(0, (int)QuickAccess.All);
+            Assert.AreEqual(1, (int)QuickAccess.RecentFiles);
+            Assert.AreEqual(2, (int)QuickAccess.FrequentFolders);
+        }
+
+        [TestMethod]
+        public void ContainsItem_UsesCaseSensitiveSubstring()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\CaseSensitive.txt" });
+
+            Assert.IsTrue(_manager.ContainsItem("Sensitive", QuickAccess.RecentFiles));
+            Assert.IsFalse(_manager.ContainsItem("sensitive", QuickAccess.RecentFiles));
+        }
+
+        [TestMethod]
+        public void ContainsItemExact_UsesWindowsPathSemantics()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder\" });
+
+            Assert.IsTrue(_manager.ContainsItemExact(@"c:/folder", QuickAccess.FrequentFolders));
+        }
+
+        [TestMethod]
+        public void ValidatePath_ProtectedPath_IsAllowedWhenItExists()
+        {
+            _fileSystem.Setup(f => f.FileExists(@"C:\Windows\System32\drivers\etc\hosts")).Returns(true);
+
+            QuickAccessManager.ValidatePath(@"C:\Windows\System32\drivers\etc\hosts", PathType.File, _fileSystem.Object);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(QuickAccessItemAlreadyExistsException))]
+        public void AddItem_ExistingItem_ThrowsSpecificException()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+
+            _manager.AddItem(@"C:\test.txt", QuickAccess.RecentFiles);
+        }
+
+        [TestMethod]
+        public void AddItem_MissingPath_ValidatesPathBeforeBusinessState()
+        {
+            _fileSystem.Setup(f => f.FileExists(@"C:\missing.txt")).Returns(false);
+
+            Assert.ThrowsException<FileNotFoundException>(
+                () => _manager.AddItem(@"C:\missing.txt", QuickAccess.RecentFiles));
+
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, It.IsAny<int>()), Times.Never);
+        }
+
+        [TestMethod]
+        public void AddItem_RecentFile_UsesNativeRecentDocs()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string>());
+
+            _manager.AddItem(@"C:\test.txt", QuickAccess.RecentFiles);
+
+            _nativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), It.IsAny<IntPtr>()), Times.Once);
+            _executor.Verify(e => e.ClearCache(), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItem_RecentFileWithRefresh_RemovesRecentBackingFile()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string>());
+
+            _manager.AddItem(@"C:\test.txt", QuickAccess.RecentFiles, new AddOptions { RefreshRecentFiles = true });
+
+            _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItem_FrequentFolder_UsesPinScript()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string>());
+
+            _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders);
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 10), Times.Once);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(UnsupportedQuickAccessOperationException))]
+        public void AddItem_All_ThrowsUnsupportedOperation()
+        {
+            _manager.AddItem(@"C:\test.txt", QuickAccess.All);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(QuickAccessItemNotFoundException))]
+        public void RemoveItem_MissingItem_ThrowsSpecificException()
+        {
+            _fileSystem.Setup(f => f.FileExists(@"C:\test.txt")).Returns(true);
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string>());
+
+            _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles);
+        }
+
+        [TestMethod]
+        public void RemoveItem_EmptyPath_ValidatesPathBeforeBusinessState()
+        {
+            Assert.ThrowsException<ArgumentException>(
+                () => _manager.RemoveItem(string.Empty, QuickAccess.RecentFiles));
+
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, It.IsAny<int>()), Times.Never);
+        }
+
+        [TestMethod]
+        public void RemoveItem_RecentFile_UsesRemoveScript()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+
+            _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles);
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void RemoveItem_DeepCleanRecentLinks_Phase0DoesNotAddSideEffects()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+
+            _manager.RemoveItem(
+                @"C:\test.txt",
+                QuickAccess.RecentFiles,
+                new RemoveOptions { DeepCleanRecentLinks = true });
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Once);
+            _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Never);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(PowerShellExecutionException))]
+        public void RemoveItem_NonZeroPowerShellExit_ThrowsPowerShellException()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
+                .ReturnsAsync(new ScriptResult(1, "out", "err"));
+
+            _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders);
+        }
+
+        [TestMethod]
+        public void ClearItems_RecentFiles_UsesNativeClear()
+        {
+            _manager.ClearItems(QuickAccess.RecentFiles);
+
+            _nativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), IntPtr.Zero), Times.Once);
+            _executor.Verify(e => e.ClearCache(), Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_InvalidTarget_ThrowsBeforeDoingWork()
+        {
+            Assert.ThrowsException<ArgumentOutOfRangeException>(
+                () => _manager.ClearItems((QuickAccess)999));
+
+            _nativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), It.IsAny<IntPtr>()), Times.Never);
+            _executor.Verify(e => e.ClearCache(), Times.Never);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ComApartmentMismatchException))]
+        public void ClearItems_ComInitializationFailure_ThrowsComApartmentMismatchException()
+        {
+            _nativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>()))
+                .Returns(unchecked((int)0x80010106));
+
+            _manager.ClearItems(QuickAccess.RecentFiles);
+        }
+
+        [TestMethod]
+        public void ClearItems_PositiveComInformationCode_DoesNotThrowComException()
+        {
+            // Any non-negative HRESULT represents success or informational status for this guard.
+            _nativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>()))
+                .Returns(2);
+
+            _manager.ClearItems(QuickAccess.RecentFiles);
+
+            _nativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), IntPtr.Zero), Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_FrequentFolders_DeletesBackingFile()
+        {
+            _manager.ClearItems(QuickAccess.FrequentFolders);
+
+            _fileSystem.Verify(f => f.DeleteFile(It.Is<string>(p => p.EndsWith("f01b4d95cf55d32a.automaticDestinations-ms"))), Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_WithRefresh_RefreshesExplorer()
+        {
+            _manager.ClearItems(QuickAccess.RecentFiles, new ClearOptions { RefreshExplorer = true });
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_AllPartialFailure_ThrowsPartialClearException()
+        {
+            _nativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>()))
+                .Throws(new Win32Exception(1));
+
+            try
             {
-                _manager.Dispose();
-                _manager = null;
+                _manager.ClearItems(QuickAccess.All);
+                Assert.Fail("Expected PartialClearException.");
+            }
+            catch (PartialClearException ex)
+            {
+                Assert.IsFalse(ex.RecentFilesCleared);
+                Assert.IsTrue(ex.FrequentFoldersCleared);
             }
         }
 
-        #region 可行性检查测试
-
         [TestMethod]
-        public async Task CheckFeasibleAsync_ReturnsExpectedValues()
+        public void AddItems_RecordsPerItemFailures()
         {
-            // 设置模拟执行器返回成功状态（退出码为0表示成功）
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithTimeout(
-                PSScript.CheckQueryFeasible,
-                null,
-                It.IsAny<int>()))
-                .ReturnsAsync(new ScriptResult(0, "查询成功", ""));
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\exists.txt" });
 
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithTimeout(
-                PSScript.CheckPinUnpinFeasible,
-                null,
-                It.IsAny<int>()))
-                .ReturnsAsync(new ScriptResult(0, "操作成功", ""));
+            var result = _manager.AddItems(new[]
+            {
+                QuickAccessItem.RecentFile(@"C:\exists.txt"),
+                QuickAccessItem.FrequentFolder(@"C:\Folder")
+            });
 
-            // 执行
-            var result = await _manager.CheckFeasibleAsync();
-
-            // 验证
-            Assert.IsTrue(result.QueryFeasible);
-            Assert.IsTrue(result.HandleFeasible);
-
-            // 验证调用了正确的方法
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithTimeout(
-                PSScript.CheckQueryFeasible,
-                null,
-                It.IsAny<int>()), Times.Once);
-
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithTimeout(
-                PSScript.CheckPinUnpinFeasible,
-                null,
-                It.IsAny<int>()), Times.Once);
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.IsTrue(result.HasPartialSuccess);
         }
 
         [TestMethod]
-        public async Task CheckFeasibleAsync_OnlyQueryFeasible_ReturnsExpectedValues()
+        public void EmptyBatch_IsCompleteSuccess()
         {
-            // 模拟执行可行性检查
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithTimeout(
-                PSScript.CheckQueryFeasible,
-                null,
-                It.IsAny<int>()))
-                .ReturnsAsync(new ScriptResult(0, "success", ""));
+            var result = _manager.RemoveItems(Array.Empty<QuickAccessItem>());
 
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithTimeout(
-                PSScript.CheckPinUnpinFeasible,
-                null,
-                It.IsAny<int>()))
-                .ReturnsAsync(new ScriptResult(1, "", "error"));
-
-            // 执行 - 重新创建管理器以刷新延迟加载
-            _manager.Dispose();
-            _manager = new QuickAccessManager(
-                _mockExecutor.Object,
-                _timeout,
-                _mockFileSystem.Object,
-                _mockNativeMethods.Object,
-                _mockDataFiles.Object);
-
-            var result = await _manager.CheckFeasibleAsync();
-
-            // 验证
-            Assert.IsTrue(result.QueryFeasible);
-            Assert.IsFalse(result.HandleFeasible);
-        }
-
-        #endregion
-
-        #region 路径验证测试
-
-        [TestMethod]
-        public void ValidatePath_ValidFilePath_NoException()
-        {
-            // 设置
-            var mockFileSystem = new Mock<IFileSystemOperations>();
-            mockFileSystem.Setup(fs => fs.FileExists(@"C:\test.txt")).Returns(true);
-
-            // 执行 - 不应抛出异常
-            QuickAccessManager.ValidatePath(@"C:\test.txt", PathType.File, mockFileSystem.Object);
-
-            // 验证
-            mockFileSystem.Verify(fs => fs.FileExists(@"C:\test.txt"), Times.Once);
+            Assert.AreEqual(0, result.Total);
+            Assert.IsTrue(result.IsCompleteSuccess);
+            Assert.IsFalse(result.HasPartialSuccess);
+            Assert.AreEqual(1.0, result.SuccessRate);
         }
 
         [TestMethod]
-        public void ValidatePath_ValidDirectoryPath_NoException()
+        public void RetryPolicy_None_RejectsGetDelay()
         {
-            // 设置
-            var mockFileSystem = new Mock<IFileSystemOperations>();
-            mockFileSystem.Setup(fs => fs.DirectoryExists(@"C:\TestFolder")).Returns(true);
-
-            // 执行 - 不应抛出异常
-            QuickAccessManager.ValidatePath(@"C:\TestFolder", PathType.Directory, mockFileSystem.Object);
-
-            // 验证
-            mockFileSystem.Verify(fs => fs.DirectoryExists(@"C:\TestFolder"), Times.Once);
+            Assert.ThrowsException<InvalidOperationException>(() => RetryPolicy.None.GetDelay(0));
         }
 
         [TestMethod]
-        public void ValidatePath_AnyPathType_ChecksBoth()
+        public void PublicApi_DoesNotExposeRemovedPhase0Surface()
         {
-            // 设置
-            var mockFileSystem = new Mock<IFileSystemOperations>();
-            mockFileSystem.Setup(fs => fs.FileExists(@"C:\test.txt")).Returns(false);
-            mockFileSystem.Setup(fs => fs.DirectoryExists(@"C:\test.txt")).Returns(true);
-
-            // 执行 - 不应抛出异常
-            QuickAccessManager.ValidatePath(@"C:\test.txt", PathType.Any, mockFileSystem.Object);
-
-            // 验证
-            mockFileSystem.Verify(fs => fs.FileExists(@"C:\test.txt"), Times.Once);
-            mockFileSystem.Verify(fs => fs.DirectoryExists(@"C:\test.txt"), Times.Once);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(SecurityException))]
-        public void ValidatePath_SystemPathSystem32_ThrowsSecurityException()
-        {
-            // 执行
-            QuickAccessManager.ValidatePath(@"C:\Windows\System32\test.dll", PathType.File, _mockFileSystem.Object);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(SecurityException))]
-        public void ValidatePath_ProgramFilesPath_ThrowsSecurityException()
-        {
-            // 执行
-            QuickAccessManager.ValidatePath(@"C:\Program Files\test\app.exe", PathType.File, _mockFileSystem.Object);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(ArgumentException))]
-        public void ValidatePath_EmptyPath_ThrowsArgumentException()
-        {
-            // 执行
-            QuickAccessManager.ValidatePath("", PathType.File, _mockFileSystem.Object);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
-        public void ValidatePath_NonExistentFile_ThrowsFileNotFoundException()
-        {
-            // 设置
-            _mockFileSystem.Setup(fs => fs.FileExists(@"C:\nonexistent.txt")).Returns(false);
-
-            // 执行
-            QuickAccessManager.ValidatePath(@"C:\nonexistent.txt", PathType.File, _mockFileSystem.Object);
-        }
-
-        #endregion
-
-        #region 项目操作测试
-
-        [TestMethod]
-        public async Task GetItemsAsync_QueryQuickAccess_CallsCorrectScript()
-        {
-            // 设置
-            var expectedItems = new List<string> { @"C:\test1.txt", @"C:\test2.txt" };
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10))
-                .ReturnsAsync(expectedItems);
-
-            // 执行
-            var result = await _manager.GetItemsAsync(QuickAccess.All);
-
-            // 验证
-            Assert.AreEqual(expectedItems.Count, result.Count);
-            Assert.AreEqual(expectedItems[0], result[0]);
-            Assert.AreEqual(expectedItems[1], result[1]);
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task GetItemsAsync_QueryRecentFiles_CallsCorrectScript()
-        {
-            // 设置
-            var expectedItems = new List<string> { @"C:\test1.txt", @"C:\test2.txt" };
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(expectedItems);
-
-            // 执行
-            var result = await _manager.GetItemsAsync(QuickAccess.RecentFiles);
-
-            // 验证
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task GetItemsAsync_QueryFrequentFolders_CallsCorrectScript()
-        {
-            // 设置
-            var expectedItems = new List<string> { @"C:\Folder1", @"C:\Folder2" };
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
-                .ReturnsAsync(expectedItems);
-
-            // 执行
-            var result = await _manager.GetItemsAsync(QuickAccess.FrequentFolders);
-
-            // 验证
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task CheckItemAsync_ItemExists_ReturnsTrue()
-        {
-            // 设置
-            var items = new List<string> { @"C:\test.txt", @"C:\another.txt" };
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(items);
-
-            // 执行
-            var result = await _manager.CheckItemAsync(@"C:\test.txt", QuickAccess.RecentFiles);
-
-            // 验证
-            Assert.IsTrue(result);
-        }
-
-        [TestMethod]
-        public async Task CheckItemAsync_ItemDoesNotExist_ReturnsFalse()
-        {
-            // 设置
-            var items = new List<string> { @"C:\test.txt", @"C:\another.txt" };
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(items);
-
-            // 执行
-            var result = await _manager.CheckItemAsync(@"C:\not-exists.txt", QuickAccess.RecentFiles);
-
-            // 验证
-            Assert.IsFalse(result);
-        }
-
-        [TestMethod]
-        public async Task AddItemAsync_RecentFile_ShouldCallNativeMethod()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(new List<string>());
-
-            // 执行
-            var result = await _manager.AddItemAsync(@"C:\test.txt", QuickAccess.RecentFiles);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockNativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), It.IsAny<IntPtr>()), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task AddItemAsync_RecentFileWithForceUpdate_ShouldCallRemoveRecentFile()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(new List<string>());
-
-            // 执行
-            var result = await _manager.AddItemAsync(@"C:\test.txt", QuickAccess.RecentFiles, true);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockDataFiles.Verify(d => d.RemoveRecentFile(), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task AddItemAsync_FrequentFolder_ShouldCallCorrectScript()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
-                .ReturnsAsync(new List<string>());
-
-            // 执行
-            var result = await _manager.AddItemAsync(@"C:\TestFolder", QuickAccess.FrequentFolders);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\TestFolder", 10), Times.Once);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public async Task AddItemAsync_ItemAlreadyExists_ThrowsInvalidOperationException()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(new List<string> { @"C:\test.txt" });
-
-            // 执行 - 应该抛出异常
-            await _manager.AddItemAsync(@"C:\test.txt", QuickAccess.RecentFiles);
-        }
-
-        [TestMethod]
-        public async Task RemoveItemAsync_RecentFile_ShouldCallCorrectScript()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(new List<string> { @"C:\test.txt" });
-
-            // 执行
-            var result = await _manager.RemoveItemAsync(@"C:\test.txt", QuickAccess.RecentFiles);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Once);
-            _mockExecutor.Verify(e => e.ClearCache(), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task RemoveItemAsync_FrequentFolder_ShouldCallCorrectScript()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
-                .ReturnsAsync(new List<string> { @"C:\TestFolder" });
-
-            // 执行
-            var result = await _manager.RemoveItemAsync(@"C:\TestFolder", QuickAccess.FrequentFolders);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\TestFolder", 10), Times.Once);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public async Task RemoveItemAsync_ItemDoesNotExist_ThrowsInvalidOperationException()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
-                .ReturnsAsync(new List<string>());
-
-            // 执行 - 应该抛出异常
-            await _manager.RemoveItemAsync(@"C:\test.txt", QuickAccess.RecentFiles);
-        }
-
-        #endregion
-
-        #region 批量操作测试
-
-        [TestMethod]
-        public async Task EmptyItemsAsync_RecentFiles_ShouldCallEmptyRecentFiles()
-        {
-            // 执行
-            var result = await _manager.EmptyItemsAsync(QuickAccess.RecentFiles);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockNativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), IntPtr.Zero), Times.Once);
-            _mockExecutor.Verify(e => e.ClearCache(), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task EmptyItemsAsync_FrequentFolders_ShouldDeleteJumplistFile()
-        {
-            // 设置
-            _mockFileSystem.Setup(fs => fs.FileExists(It.IsAny<string>())).Returns(true);
-
-            // 执行
-            var result = await _manager.EmptyItemsAsync(QuickAccess.FrequentFolders);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockFileSystem.Verify(fs => fs.DeleteFile(It.IsAny<string>()), Times.Once);
-            _mockExecutor.Verify(e => e.ClearCache(), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task EmptyItemsAsync_All_ShouldCallBothEmptyMethods()
-        {
-            // 设置
-            _mockFileSystem.Setup(fs => fs.FileExists(It.IsAny<string>())).Returns(true);
-
-            // 执行
-            var result = await _manager.EmptyItemsAsync(QuickAccess.All);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockNativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), IntPtr.Zero), Times.Once);
-            _mockFileSystem.Verify(fs => fs.DeleteFile(It.IsAny<string>()), Times.Once);
-            _mockExecutor.Verify(e => e.ClearCache(), Times.AtLeastOnce);
-        }
-
-        [TestMethod]
-        public async Task EmptyItemsAsync_WithForceRefresh_ShouldCallRefreshExplorer()
-        {
-            // 执行
-            var result = await _manager.EmptyItemsAsync(QuickAccess.RecentFiles, true);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockExecutor.Verify(e => e.ExecutePSScript(PSScript.RefreshExplorer, null), Times.Once);
-        }
-
-        [TestMethod]
-        public async Task EmptyItemsAsync_FrequentFoldersWithSystemDefault_ShouldCallEmptyPinnedFolders()
-        {
-            // 执行
-            var result = await _manager.EmptyItemsAsync(QuickAccess.FrequentFolders, false, true);
-
-            // 验证
-            Assert.IsTrue(result);
-            _mockExecutor.Verify(e => e.ExecutePSScriptWithCache(PSScript.EmptyPinnedFolders, null, 0), Times.Once);
-        }
-
-        #endregion
-
-        #region 缓存控制测试
-
-        [TestMethod]
-        public void ClearCache_CallsExecutorClearCache()
-        {
-            // 执行
-            _manager.ClearCache();
-
-            // 验证
-            _mockExecutor.Verify(e => e.ClearCache(), Times.Once);
-        }
-
-        #endregion
-
-        #region 异常处理测试
-
-        [TestMethod]
-        public async Task HandleOperationAsync_ExecutorReturnsNonZeroExitCode_ReturnsFalse()
-        {
-            // 设置
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
-                .ReturnsAsync(new List<string>());
-
-            _mockExecutor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\TestFolder", 10))
-                .ReturnsAsync(new ScriptResult(1, "", "Error occurred"));
-
-            // 执行
-            var result = await _manager.AddItemAsync(@"C:\TestFolder", QuickAccess.FrequentFolders);
-
-            // 验证
-            Assert.IsFalse(result);
-        }
-
-        [TestMethod]
-        public async Task EmptyItemsAsync_ExceptionInOperation_ReturnsFalse()
-        {
-            // 设置
-            _mockNativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>()))
-                .Throws(new Win32Exception(1, "COM initialization failed"));
-
-            // 执行
-            var result = await _manager.EmptyItemsAsync(QuickAccess.RecentFiles);
-
-            // 验证
-            Assert.IsFalse(result);
-        }
-
-        #endregion
-    }
-
-    /// <summary>
-    /// 用于替代文件系统静态方法的辅助类
-    /// </summary>
-    public class FileSystemHelper : IDisposable
-    {
-        // 保存原始的文件系统检查方法
-        private readonly Func<string, bool> _originalFileExists;
-        private readonly Func<string, bool> _originalDirectoryExists;
-
-        // 用于测试的替代字典
-        private readonly Dictionary<string, bool> _fileExistsMap = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, bool> _directoryExistsMap = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-
-        public FileSystemHelper()
-        {
-            // 保存原始方法引用（在实际测试中，您可能需要使用反射或其他方式替换静态方法）
-            _originalFileExists = File.Exists;
-            _originalDirectoryExists = Directory.Exists;
-
-            // 这里应使用反射或其他方式替换静态方法，此处仅为示例
-            // ReplacementHelper.ReplaceMethod(typeof(File), "Exists", new Func<string, bool>(TestFileExists));
-            // ReplacementHelper.ReplaceMethod(typeof(Directory), "Exists", new Func<string, bool>(TestDirectoryExists));
-        }
-
-        public void SetupFileExists(string path, bool exists)
-        {
-            _fileExistsMap[path] = exists;
-        }
-
-        public void SetupDirectoryExists(string path, bool exists)
-        {
-            _directoryExistsMap[path] = exists;
-        }
-
-        private bool TestFileExists(string path)
-        {
-            return _fileExistsMap.TryGetValue(path, out bool exists) ? exists : _originalFileExists(path);
-        }
-
-        private bool TestDirectoryExists(string path)
-        {
-            return _directoryExistsMap.TryGetValue(path, out bool exists) ? exists : _originalDirectoryExists(path);
-        }
-
-        public void Dispose()
-        {
-            // 恢复原始方法（在实际测试中，您可能需要使用反射或其他方式恢复静态方法）
-            // ReplacementHelper.RestoreMethod(typeof(File), "Exists");
-            // ReplacementHelper.RestoreMethod(typeof(Directory), "Exists");
+            var assembly = typeof(QuickAccessManager).Assembly;
+            var managerMethods = typeof(QuickAccessManager).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+
+            Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Async", StringComparison.Ordinal)));
+            Assert.IsFalse(managerMethods.Any(m => m.Name == "ClearCache"));
+            Assert.IsNull(assembly.GetType("Wincent.IQuickAccessManager"));
+            Assert.IsNull(assembly.GetType("Wincent.ExecutionFeasibilityStatus"));
         }
     }
 }

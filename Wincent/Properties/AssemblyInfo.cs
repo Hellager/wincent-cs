@@ -39,3 +39,4 @@ using System.Runtime.InteropServices;
 
 // 允许测试程序集访问内部成员
 [assembly: InternalsVisibleTo("TestWincent")]
+[assembly: InternalsVisibleTo("DynamicProxyGenAssembly2")]

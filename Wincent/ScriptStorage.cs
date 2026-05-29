@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace Wincent
 {
-    public static class ScriptStorage
+    internal static class ScriptStorage
     {
         /// <summary>
         /// Current script version from assembly version (major.minor.build)

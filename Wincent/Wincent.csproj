@@ -21,6 +21,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <DocumentationFile>bin\Debug\Wincent.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -29,6 +30,7 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <DocumentationFile>bin\Release\Wincent.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>icon.ico</ApplicationIcon>
@@ -44,7 +46,8 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ExecutionFeasibilityStatus.cs" />
+    <Compile Include="DestListTypes.cs" />
+    <Compile Include="Phase0Types.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="QuickAccessDataFiles.cs" />
     <Compile Include="QuickAccessManager.cs" />
@@ -52,6 +55,7 @@
     <Compile Include="ScriptStorage.cs" />
     <Compile Include="ScriptStrategy.cs" />
     <Compile Include="TempFile.cs" />
+    <Compile Include="WincentExceptions.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="icon.ico" />

@@ -11,7 +11,7 @@ namespace Wincent
     /// using var tempFile = TempFile.Create("Hello World", "txt");
     /// var content = File.ReadAllText(tempFile.FullPath);
     /// </summary>
-    public sealed class TempFile : IDisposable
+    internal sealed class TempFile : IDisposable
     {
         /// <summary>
         /// Gets the full path of the temporary file
@@ -35,6 +35,7 @@ namespace Wincent
         /// </summary>
         /// <param name="content">Binary file content</param>
         /// <param name="extension">File extension (with or without leading dot)</param>
+        /// <param name="encoding">Text encoding reserved for compatibility with existing callers.</param>
         public static TempFile Create(byte[] content, string extension = ".ps1", Encoding encoding = null)
         {
             if (encoding == null) encoding = Encoding.UTF8;

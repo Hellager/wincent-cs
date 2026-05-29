@@ -1,118 +1,93 @@
 # Wincent
 
-Wincent is a .NET Framework library that provides a clean interface for managing Windows Quick Access items. It's a C# implementation of [wincent-rs](https://github.com/Hellager/wincent-rs), allowing you to programmatically interact with Windows Explorer's Quick Access feature, including recent files and frequent folders.
+Wincent is a .NET Framework library for managing Windows Explorer Quick Access items. It is a C# implementation of [wincent-rs](https://github.com/Hellager/wincent-rs), with APIs for recent files and frequent folders.
 
 ## Features
 
 - Query Quick Access items
 - Manage recent files
-- Handle frequent folders
-- Pin/Unpin folders to Quick Access
-- UTF-8 encoding support
+- Manage frequent folders
+- Pin and unpin folders
+- Clear Quick Access sections
 
-## Installation
+## Requirements
 
-Install via NuGet Package Manager:
-
-```powershell
-dotnet add package Wincent --version 0.1.4
-```
+- .NET Framework 4.8
+- Windows with PowerShell
 
 ## Usage
-
-### Basic Setup
 
 ```csharp
 using Wincent;
 
-// Initialize QuickAccessManager
-var quickAccessManager = new QuickAccessManager();
+var manager = new QuickAccessManager();
 
-// Check system compatibility，Not Necessary
-var (queryFeasible, handleFeasible) = await quickAccessManager.CheckFeasibleAsync();
-if (!queryFeasible)
-{
-    Console.WriteLine("System compatibility check failed");
-    return;
-}
+var allItems = manager.GetItems(QuickAccess.All);
+var recentFiles = manager.GetItems(QuickAccess.RecentFiles);
+var frequentFolders = manager.GetItems(QuickAccess.FrequentFolders);
+
+bool containsKeyword = manager.ContainsItem("report", QuickAccess.RecentFiles);
+bool containsExactPath = manager.ContainsItemExact(@"C:\path\to\file.txt", QuickAccess.RecentFiles);
 ```
 
-### Query Quick Access Items
+### Add And Remove Items
 
 ```csharp
-// Get all items
-var allItems = await quickAccessManager.GetItemsAsync(QuickAccess.All);
+var manager = new QuickAccessManager();
 
-// Get recent files
-var recentFiles = await quickAccessManager.GetItemsAsync(QuickAccess.RecentFiles);
+manager.AddItem(@"C:\path\to\file.txt", QuickAccess.RecentFiles);
+manager.AddItem(
+    @"C:\path\to\folder",
+    QuickAccess.FrequentFolders);
 
-// Get frequent folders
-var frequentFolders = await quickAccessManager.GetItemsAsync(QuickAccess.FrequentFolders);
-
-// Display items
-foreach (var item in recentFiles)
-{
-    Console.WriteLine(item);
-}
+manager.RemoveItem(@"C:\path\to\file.txt", QuickAccess.RecentFiles);
+manager.RemoveItem(
+    @"C:\path\to\folder",
+    QuickAccess.FrequentFolders,
+    new RemoveOptions { DeepCleanRecentLinks = false });
 ```
 
-### Add Items to Quick Access
+### Clear Items
 
 ```csharp
-// Add a file to recent files
-await quickAccessManager.AddItemAsync(@"C:\path\to\file.txt", QuickAccess.RecentFiles);
+var manager = new QuickAccessManager();
 
-// Add a folder to frequent folders
-await quickAccessManager.AddItemAsync(@"C:\path\to\folder", QuickAccess.FrequentFolders);
-```
-
-### Remove Items from Quick Access
-
-```csharp
-// Remove a file from recent files
-await quickAccessManager.RemoveItemAsync(@"C:\path\to\file.txt", QuickAccess.RecentFiles);
-
-// Remove a folder from frequent folders
-await quickAccessManager.RemoveItemAsync(@"C:\path\to\folder", QuickAccess.FrequentFolders);
+manager.ClearItems(QuickAccess.RecentFiles);
+manager.ClearItems(
+    QuickAccess.FrequentFolders,
+    new ClearOptions
+    {
+        RemovePinnedFolders = true,
+        RefreshExplorer = true
+    });
 ```
 
 ### Batch Operations
 
 ```csharp
-// Clear all recent files
-await quickAccessManager.EmptyItemsAsync(QuickAccess.RecentFiles);
+var manager = new QuickAccessManager();
 
-// Clear all frequent folders
-await quickAccessManager.EmptyItemsAsync(QuickAccess.FrequentFolders);
+BatchResult result = manager.AddItems(
+    new[]
+    {
+        QuickAccessItem.RecentFile(@"C:\path\to\file.txt"),
+        QuickAccessItem.FrequentFolder(@"C:\path\to\folder")
+    },
+    new BatchOptions { RefreshRecentFiles = true });
 
-// Clear all items
-await quickAccessManager.EmptyItemsAsync(QuickAccess.All);
-
-// Clear with system defaults
-await quickAccessManager.EmptyItemsAsync(QuickAccess.All, alsoSystemDefault: true);
+foreach (BatchFailure failure in result.Failed)
+{
+    Console.WriteLine($"{failure.Item.Path}: {failure.Error.Message}");
+}
 ```
 
-### Check Item Existence
+## Breaking Changes In The 0.2 Migration
 
-```csharp
-// Check if a file exists in recent files
-bool exists = await quickAccessManager.CheckItemAsync(@"C:\path\to\file.txt", QuickAccess.RecentFiles);
-```
-
-## Requirements
-
-- .NET Framework 4.8
-- Windows OS with PowerShell
-- Administrative privileges for certain operations
+- Public async APIs were removed.
+- `IQuickAccessManager`, `ExecutionFeasibilityStatus`, and `QuickAccessManager.ClearCache()` were removed from the public surface.
+- Operation failures are reported with exceptions instead of `bool` return values.
+- Boolean behavior switches were replaced by options classes.
 
 ## License
 
 MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Credits
-
-This project is a C# port of [wincent-rs](https://github.com/Hellager/wincent-rs).

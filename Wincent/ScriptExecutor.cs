@@ -9,7 +9,7 @@ using System.Linq;
 
 namespace Wincent
 {
-    public enum ExecutionPolicy
+    internal enum ExecutionPolicy
     {
         Restricted,
         AllSigned,
@@ -20,7 +20,7 @@ namespace Wincent
     }
 
     [Serializable]
-    public class ScriptResult
+    internal class ScriptResult
     {
         public int ExitCode { get; }
         public string Output { get; }
@@ -34,7 +34,7 @@ namespace Wincent
         }
     }
 
-    public class ScriptExecutionException : Exception
+    internal class ScriptExecutionException : Exception
     {
         public string Output { get; }
         public string Error { get; }
@@ -61,7 +61,7 @@ namespace Wincent
         }
     }
 
-    public class ScriptTimeoutException : Exception
+    internal class ScriptTimeoutException : Exception
     {
         public string Output { get; }
         public string Error { get; }
@@ -77,7 +77,7 @@ namespace Wincent
         }
     }
 
-    public class ScriptProcessException : ScriptExecutionException
+    internal class ScriptProcessException : ScriptExecutionException
     {
         public int ProcessId { get; }
 
@@ -86,7 +86,7 @@ namespace Wincent
             => ProcessId = processId;
     }
 
-    public class InvalidPathException : Exception
+    internal class InvalidPathException : Exception
     {
         public string Path { get; }
 
@@ -161,7 +161,7 @@ namespace Wincent
     /// <summary>
     /// File system service interface for dependency injection
     /// </summary>
-    public interface IFileSystemService
+    internal interface IFileSystemService
     {
         bool FileExists(string path);
         bool DirectoryExists(string path);
@@ -170,7 +170,7 @@ namespace Wincent
     /// <summary>
     /// Default file system service implementation
     /// </summary>
-    public class DefaultFileSystemService : IFileSystemService
+    internal class DefaultFileSystemService : IFileSystemService
     {
         public bool FileExists(string path)
         {
@@ -186,7 +186,7 @@ namespace Wincent
     /// <summary>
     /// Script storage service interface for dependency injection
     /// </summary>
-    public interface IScriptStorageService
+    internal interface IScriptStorageService
     {
         string GetScriptPath(PSScript script);
         string GetDynamicScriptPath(PSScript script, string parameter);
@@ -197,7 +197,7 @@ namespace Wincent
     /// <summary>
     /// Default script storage service implementation
     /// </summary>
-    public class DefaultScriptStorageService : IScriptStorageService
+    internal class DefaultScriptStorageService : IScriptStorageService
     {
         public string GetScriptPath(PSScript script)
         {
@@ -223,7 +223,7 @@ namespace Wincent
     /// <summary>
     /// Script executor interface
     /// </summary>
-    public interface IScriptExecutor : IDisposable
+    internal interface IScriptExecutor : IDisposable
     {
         /// <summary>
         /// Executes PowerShell script with caching and optional timeout
@@ -254,7 +254,7 @@ namespace Wincent
         void ClearCache();
     }
 
-    public sealed class ScriptExecutor : IScriptExecutor
+    internal sealed class ScriptExecutor : IScriptExecutor
     {
         private readonly IFileSystemService _fileSystemService;
         private readonly IScriptStorageService _scriptStorageService;
