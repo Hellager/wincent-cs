@@ -967,6 +967,38 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void GetRecentFilesMetadata_ParsesRecentBackingFile()
+        {
+            var reader = new Mock<IDestListMetadataReader>(MockBehavior.Strict);
+            var entry = new DestListEntry { Path = @"C:\recent.txt" };
+            reader.Setup(r => r.ParseFile(@"C:\recent.automaticDestinations-ms"))
+                .Returns(CreateDestinations(entry));
+            _manager.Dispose();
+            _manager = CreateManager(reader.Object);
+
+            var result = _manager.GetRecentFilesMetadata();
+
+            Assert.AreSame(entry, result[0]);
+            reader.Verify(r => r.ParseFile(@"C:\recent.automaticDestinations-ms"), Times.Once);
+        }
+
+        [TestMethod]
+        public void GetFrequentFoldersMetadata_ParsesFrequentBackingFile()
+        {
+            var reader = new Mock<IDestListMetadataReader>(MockBehavior.Strict);
+            var entry = new DestListEntry { Path = @"C:\Folder" };
+            reader.Setup(r => r.ParseFile(@"C:\frequent.automaticDestinations-ms"))
+                .Returns(CreateDestinations(entry));
+            _manager.Dispose();
+            _manager = CreateManager(reader.Object);
+
+            var result = _manager.GetFrequentFoldersMetadata();
+
+            Assert.AreSame(entry, result[0]);
+            reader.Verify(r => r.ParseFile(@"C:\frequent.automaticDestinations-ms"), Times.Once);
+        }
+
+        [TestMethod]
         public void PublicApi_DoesNotExposeRemovedPhase0Surface()
         {
             var assembly = typeof(QuickAccessManager).Assembly;
@@ -974,7 +1006,6 @@ namespace TestWincent
 
             Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Async", StringComparison.Ordinal)));
             Assert.IsFalse(managerMethods.Any(m => m.Name == "ClearCache"));
-            Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Metadata", StringComparison.Ordinal)));
             Assert.IsNull(assembly.GetType("Wincent.IQuickAccessManager"));
             Assert.IsNull(assembly.GetType("Wincent.ExecutionFeasibilityStatus"));
         }
@@ -986,6 +1017,7 @@ namespace TestWincent
             {
                 "Wincent.AddOptions",
                 "Wincent.AutomaticDestinations",
+                "Wincent.AutomaticDestinationsKind",
                 "Wincent.BatchFailure",
                 "Wincent.BatchOptions",
                 "Wincent.BatchResult",
@@ -998,6 +1030,9 @@ namespace TestWincent
                 "Wincent.DestListEntry",
                 "Wincent.DestListParseException",
                 "Wincent.DestListUnsupportedVersionException",
+                "Wincent.ExperimentalDestListRemoval",
+                "Wincent.ExperimentalRemoveOptions",
+                "Wincent.ExperimentalRemoveReport",
                 "Wincent.PartialClearException",
                 "Wincent.PowerShellErrorKind",
                 "Wincent.PowerShellExecutionException",
@@ -1090,6 +1125,31 @@ namespace TestWincent
                 _recentLinksCleaner.Object,
                 new NoOpQuickAccessLockFactory(),
                 visibility);
+        }
+
+        private QuickAccessManager CreateManager(IDestListMetadataReader destListReader)
+        {
+            return new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                RetryPolicy.Standard,
+                new PowerShellFallbackNativeQuery(),
+                _nativeMutation.Object,
+                _explorerRefresher.Object,
+                _recentLinksCleaner.Object,
+                new NoOpQuickAccessLockFactory(),
+                new NoOpQuickAccessVisibility(),
+                destListReader);
+        }
+
+        private static AutomaticDestinations CreateDestinations(params DestListEntry[] entries)
+        {
+            return new AutomaticDestinations(
+                new CfbInfo(512, 64, 4096, Array.Empty<CfbDirectoryEntry>()),
+                new DestList { Entries = entries });
         }
 
         private static QuickAccessLock CreateEmptyLock(QuickAccessLockTarget target)

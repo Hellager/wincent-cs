@@ -47,7 +47,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="DestListTypes.cs" />
+    <Compile Include="DestListParser.cs" />
     <Compile Include="Infrastructure\ComGuard.cs" />
+    <Compile Include="ExperimentalDestListRemoval.cs" />
     <Compile Include="Infrastructure\NativeFileHandle.cs" />
     <Compile Include="Infrastructure\PowerShellExecutionHelpers.cs" />
     <Compile Include="Infrastructure\StaThreadRunner.cs" />

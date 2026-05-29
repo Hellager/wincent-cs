@@ -1,0 +1,851 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+
+namespace Wincent
+{
+    internal interface IDestListMetadataReader
+    {
+        AutomaticDestinations ParseFile(string path);
+
+        AutomaticDestinations ParseBytes(byte[] data);
+    }
+
+    internal sealed class DefaultDestListMetadataReader : IDestListMetadataReader
+    {
+        public AutomaticDestinations ParseFile(string path)
+        {
+            return DestListMetadataParser.ParseFile(path);
+        }
+
+        public AutomaticDestinations ParseBytes(byte[] data)
+        {
+            return DestListMetadataParser.ParseBytes(data);
+        }
+    }
+
+    internal sealed class NoOpDestListMetadataReader : IDestListMetadataReader
+    {
+        public AutomaticDestinations ParseFile(string path)
+        {
+            throw new InvalidOperationException("DestList metadata is disabled for this instance.");
+        }
+
+        public AutomaticDestinations ParseBytes(byte[] data)
+        {
+            throw new InvalidOperationException("DestList metadata is disabled for this instance.");
+        }
+    }
+
+    internal static class DestListMetadataParser
+    {
+        public static AutomaticDestinations ParseFile(string path)
+        {
+            if (path == null)
+                throw new ArgumentNullException(nameof(path));
+
+            return ParseBytes(File.ReadAllBytes(path), path);
+        }
+
+        public static AutomaticDestinations ParseBytes(byte[] data)
+        {
+            return ParseBytes(data, null);
+        }
+
+        private static AutomaticDestinations ParseBytes(byte[] data, string filePath)
+        {
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+
+            CompoundFile cfb = CompoundFile.Parse(data, filePath);
+            DestList destList = ParseDestList(cfb, filePath);
+            var cfbInfo = new CfbInfo(
+                cfb.SectorSize,
+                cfb.MiniSectorSize,
+                cfb.MiniCutoffSize,
+                cfb.DirectoryEntries
+                    .Select(entry => new CfbDirectoryEntry(
+                        entry.Name,
+                        entry.RawObjectType,
+                        MapObjectType(entry.RawObjectType),
+                        entry.StartSector,
+                        entry.StreamSize))
+                    .ToList());
+
+            return new AutomaticDestinations(cfbInfo, destList);
+        }
+
+        internal static string RecentFilesDestPath()
+        {
+            return Path.Combine(
+                new WindowsRecentFolder(new DefaultNativeMethods()).GetPath(),
+                "AutomaticDestinations",
+                "5f7b5f1e01b83767.automaticDestinations-ms");
+        }
+
+        internal static string FrequentFoldersDestPath()
+        {
+            return Path.Combine(
+                new WindowsRecentFolder(new DefaultNativeMethods()).GetPath(),
+                "AutomaticDestinations",
+                "f01b4d95cf55d32a.automaticDestinations-ms");
+        }
+
+        private static DestList ParseDestList(CompoundFile cfb, string filePath)
+        {
+            byte[] destList = cfb.Stream("DestList");
+            if (destList == null)
+                throw new DestListParseException(filePath, null, "DestList stream not found.");
+
+            if (destList.Length < 32)
+            {
+                return new DestList
+                {
+                    Version = 0,
+                    DeclaredEntryCount = 0,
+                    PinnedEntryCount = 0,
+                    LastEntryId = 0,
+                    LastEntryNumber = 0,
+                    LastEntryNumberReserved = 0,
+                    LastRevisionNumber = 0,
+                    LastRevisionNumberReserved = 0,
+                    Entries = new List<DestListEntry>()
+                };
+            }
+
+            uint version = ReadUInt32(destList, 0, filePath);
+            if (version != 1 && version != 3 && version != 4 && version != 6)
+                throw new DestListUnsupportedVersionException(filePath, 0, version);
+
+            int declaredEntryCount = checked((int)ReadUInt32(destList, 4, filePath));
+            // Offset 8 is also exposed as LastEntryId below; keep the low 32-bit view
+            // for the legacy pinned-count field until the format mapping is tightened.
+            uint pinnedEntryCount = ReadUInt32(destList, 8, filePath);
+            ulong lastEntryId = ReadUInt64(destList, 8, filePath);
+            uint lastEntryNumber = ReadUInt32(destList, 16, filePath);
+            uint lastEntryNumberReserved = ReadUInt32(destList, 20, filePath);
+            uint lastRevisionNumber = ReadUInt32(destList, 24, filePath);
+            uint lastRevisionNumberReserved = ReadUInt32(destList, 28, filePath);
+
+            int offset = 32;
+            var entries = new List<DestListEntry>();
+            for (int i = 0; i < declaredEntryCount; i++)
+            {
+                DestListEntry entry = ParseDestListEntry(cfb, destList, version, offset, filePath);
+                if (entry == null)
+                {
+                    if (i == 0)
+                    {
+                        throw new DestListParseException(
+                            filePath,
+                            offset,
+                            $"DestList truncated before first entry (declared {declaredEntryCount}).");
+                    }
+
+                    break;
+                }
+
+                offset = checked(offset + entry.EntryLength);
+                entries.Add(entry);
+            }
+
+            return new DestList
+            {
+                Version = version,
+                DeclaredEntryCount = declaredEntryCount,
+                PinnedEntryCount = pinnedEntryCount,
+                LastEntryId = lastEntryId,
+                LastEntryNumber = lastEntryNumber,
+                LastEntryNumberReserved = lastEntryNumberReserved,
+                LastRevisionNumber = lastRevisionNumber,
+                LastRevisionNumberReserved = lastRevisionNumberReserved,
+                Entries = entries
+            };
+        }
+
+        private static DestListEntry ParseDestListEntry(
+            CompoundFile cfb,
+            byte[] destList,
+            uint version,
+            int offset,
+            string filePath)
+        {
+            if (version == 1)
+                return ParseDestListEntryV1(cfb, destList, offset, filePath);
+
+            return ParseDestListEntryV2OrLater(cfb, destList, offset, filePath);
+        }
+
+        private static DestListEntry ParseDestListEntryV1(
+            CompoundFile cfb,
+            byte[] destList,
+            int offset,
+            string filePath)
+        {
+            if (offset + 0x72 > destList.Length)
+                return null;
+
+            uint entryNumber = ReadUInt32(destList, offset + 0x58, filePath);
+            uint entryNumberReserved = ReadUInt32(destList, offset + 0x5c, filePath);
+            float score = BitConverter.ToSingle(BitConverter.GetBytes(ReadUInt32(destList, offset + 0x60, filePath)), 0);
+            ulong? lastInteractionFiletime = ReadOptionalUInt64(destList, offset + 0x64);
+            int pinStatus = ReadInt32(destList, offset + 0x6c, filePath);
+            int pathChars = checked((int)ReadUInt16(destList, offset + 0x70, filePath));
+            int pathStart = offset + 0x72;
+            int pathEnd = checked(pathStart + pathChars * 2);
+            if (pathEnd > destList.Length)
+                return null;
+
+            return BuildEntry(
+                cfb,
+                offset,
+                pathEnd - offset,
+                entryNumber,
+                entryNumberReserved,
+                SliceBytes(destList, pathStart, pathEnd - pathStart),
+                pinStatus,
+                -1,
+                0,
+                score,
+                lastInteractionFiletime,
+                null,
+                filePath);
+        }
+
+        private static DestListEntry ParseDestListEntryV2OrLater(
+            CompoundFile cfb,
+            byte[] destList,
+            int offset,
+            string filePath)
+        {
+            if (offset + 0x82 > destList.Length)
+                return null;
+
+            uint entryNumber = ReadUInt32(destList, offset + 0x58, filePath);
+            uint entryNumberReserved = ReadUInt32(destList, offset + 0x5c, filePath);
+            float score = BitConverter.ToSingle(BitConverter.GetBytes(ReadUInt32(destList, offset + 0x60, filePath)), 0);
+            ulong? lastInteractionFiletime = ReadOptionalUInt64(destList, offset + 0x64);
+            int pinStatus = ReadInt32(destList, offset + 0x6c, filePath);
+            int recentRank = ReadInt32(destList, offset + 0x70, filePath);
+            uint accessCount = ReadUInt32(destList, offset + 0x74, filePath);
+            int pathChars = checked((int)ReadUInt16(destList, offset + 0x80, filePath));
+            int pathStart = offset + 0x82;
+            int pathEnd = checked(pathStart + pathChars * 2);
+            if (pathEnd > destList.Length || pathEnd + 4 > destList.Length)
+                return null;
+
+            uint spsSize = ReadUInt32(destList, pathEnd, filePath);
+            int entryEnd = checked(pathEnd + 4 + checked((int)spsSize));
+            if (entryEnd > destList.Length)
+                return null;
+
+            return BuildEntry(
+                cfb,
+                offset,
+                entryEnd - offset,
+                entryNumber,
+                entryNumberReserved,
+                SliceBytes(destList, pathStart, pathEnd - pathStart),
+                pinStatus,
+                recentRank,
+                accessCount,
+                score,
+                lastInteractionFiletime,
+                spsSize,
+                filePath);
+        }
+
+        private static DestListEntry BuildEntry(
+            CompoundFile cfb,
+            int entryOffset,
+            int entryLength,
+            uint entryNumber,
+            uint entryNumberReserved,
+            byte[] rawPathBytes,
+            int pinStatus,
+            int recentRank,
+            uint accessCount,
+            float score,
+            ulong? lastInteractionFiletime,
+            uint? spsSize,
+            string filePath)
+        {
+            string rawPath = DecodeUtf16Lossy(rawPathBytes);
+            string streamName = entryNumber.ToString("x", CultureInfo.InvariantCulture);
+            string path = ResolvePath(cfb, streamName, rawPath);
+            DateTimeOffset? lastInteractionTime = FileTimeToDateTimeOffset(lastInteractionFiletime);
+
+            return new DestListEntry
+            {
+                EntryOffset = entryOffset,
+                EntryLength = entryLength,
+                EntryId = entryNumber,
+                EntryNumber = entryNumber,
+                EntryNumberReserved = entryNumberReserved,
+                StreamName = streamName,
+                RawPath = rawPath,
+                Path = path,
+                PinStatus = pinStatus,
+                PinOrder = pinStatus >= 0 ? (int?)pinStatus : null,
+                IsPinned = pinStatus >= 0,
+                Rank = recentRank,
+                RecentRank = recentRank,
+                AccessCount = accessCount,
+                Score = score,
+                LastAccessTime = lastInteractionTime,
+                LastInteractionTime = lastInteractionTime,
+                SerializedPropertyStoreSize = spsSize
+            };
+        }
+
+        private static string ResolvePath(CompoundFile cfb, string streamName, string rawPath)
+        {
+            if (rawPath != null && rawPath.StartsWith("knownfolder:", StringComparison.OrdinalIgnoreCase))
+            {
+                byte[] linkBytes = cfb.Stream(streamName);
+                if (linkBytes != null)
+                {
+                    string linkPath = ParseLnkLocalPath(linkBytes);
+                    if (!string.IsNullOrWhiteSpace(linkPath))
+                        return linkPath;
+                }
+            }
+
+            return rawPath ?? string.Empty;
+        }
+
+        private static CfbObjectType MapObjectType(byte rawObjectType)
+        {
+            switch (rawObjectType)
+            {
+                case 1:
+                    return CfbObjectType.Storage;
+                case 2:
+                    return CfbObjectType.Stream;
+                case 5:
+                    return CfbObjectType.Root;
+                default:
+                    return CfbObjectType.Unknown;
+            }
+        }
+
+        private static DateTimeOffset? FileTimeToDateTimeOffset(ulong? filetime)
+        {
+            if (!filetime.HasValue)
+                return null;
+
+            try
+            {
+                return new DateTimeOffset(DateTime.FromFileTimeUtc(checked((long)filetime.Value)), TimeSpan.Zero);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+
+        private static string ParseLnkLocalPath(byte[] data)
+        {
+            if (data == null || data.Length < 0x4c || ReadUInt32(data, 0, null) != 0x4c)
+                return null;
+
+            uint flags = ReadUInt32(data, 0x14, null);
+            int offset = 0x4c;
+
+            if ((flags & 0x1) != 0)
+            {
+                int idListSize = checked((int)ReadUInt16(data, offset, null));
+                offset = checked(offset + 2 + idListSize);
+            }
+
+            if ((flags & 0x2) == 0 || offset + 28 > data.Length)
+                return null;
+
+            int linkInfoStart = offset;
+            int linkInfoSize = checked((int)ReadUInt32(data, linkInfoStart, null));
+            int linkInfoHeaderSize = checked((int)ReadUInt32(data, linkInfoStart + 4, null));
+            int linkInfoEnd = checked(linkInfoStart + linkInfoSize);
+            if (linkInfoSize < 28 || linkInfoEnd > data.Length)
+                return null;
+
+            int localBaseOffset = checked((int)ReadUInt32(data, linkInfoStart + 16, null));
+            int commonSuffixOffset = checked((int)ReadUInt32(data, linkInfoStart + 24, null));
+            int localBaseUnicodeOffset = linkInfoHeaderSize >= 0x24 && linkInfoStart + 32 <= data.Length
+                ? checked((int)ReadUInt32(data, linkInfoStart + 28, null))
+                : 0;
+            int commonSuffixUnicodeOffset = linkInfoHeaderSize >= 0x24 && linkInfoStart + 36 <= data.Length
+                ? checked((int)ReadUInt32(data, linkInfoStart + 32, null))
+                : 0;
+
+            string basePath = ReadUtf16ZStringInLinkInfo(data, linkInfoStart, linkInfoSize, localBaseUnicodeOffset)
+                ?? ReadCStringInLinkInfo(data, linkInfoStart, linkInfoSize, localBaseOffset);
+            string suffixPath = ReadUtf16ZStringInLinkInfo(data, linkInfoStart, linkInfoSize, commonSuffixUnicodeOffset)
+                ?? ReadCStringInLinkInfo(data, linkInfoStart, linkInfoSize, commonSuffixOffset);
+
+            if (!string.IsNullOrEmpty(basePath) && !string.IsNullOrEmpty(suffixPath))
+                return JoinWindowsPath(basePath, suffixPath);
+
+            if (LooksLikeWindowsPath(basePath))
+                return basePath;
+
+            if (LooksLikeWindowsPath(suffixPath))
+                return suffixPath;
+
+            return null;
+        }
+
+        private static string ReadCStringInLinkInfo(byte[] data, int linkInfoStart, int linkInfoSize, int relativeOffset)
+        {
+            if (relativeOffset == 0 || relativeOffset >= linkInfoSize)
+                return null;
+
+            int absoluteOffset = checked(linkInfoStart + relativeOffset);
+            int linkInfoEnd = checked(linkInfoStart + linkInfoSize);
+            return ReadCString(data, absoluteOffset, linkInfoEnd);
+        }
+
+        private static string ReadUtf16ZStringInLinkInfo(byte[] data, int linkInfoStart, int linkInfoSize, int relativeOffset)
+        {
+            if (relativeOffset == 0 || relativeOffset >= linkInfoSize)
+                return null;
+
+            int absoluteOffset = checked(linkInfoStart + relativeOffset);
+            int linkInfoEnd = checked(linkInfoStart + linkInfoSize);
+            return ReadUtf16ZString(data, absoluteOffset, linkInfoEnd);
+        }
+
+        private static string JoinWindowsPath(string basePath, string suffixPath)
+        {
+            if (LooksLikeWindowsPath(suffixPath))
+                return suffixPath;
+
+            if (basePath.EndsWith("\\", StringComparison.Ordinal) || suffixPath.Length == 0)
+                return basePath + suffixPath;
+
+            return basePath + "\\" + suffixPath;
+        }
+
+        private static bool LooksLikeWindowsPath(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length < 3)
+                return false;
+
+            return value[1] == ':' && (value[2] == '\\' || value[2] == '/');
+        }
+
+        private static string ReadCString(byte[] data, int offset, int limit)
+        {
+            if (offset >= data.Length || offset >= limit)
+                return null;
+
+            int end = offset;
+            while (end < data.Length && end < limit && data[end] != 0)
+                end++;
+
+            if (end >= data.Length || end >= limit)
+                return null;
+
+            return Encoding.ASCII.GetString(data, offset, end - offset);
+        }
+
+        private static string ReadUtf16ZString(byte[] data, int offset, int limit)
+        {
+            if (offset + 1 >= data.Length || offset + 1 >= limit)
+                return null;
+
+            int end = offset;
+            while (end + 1 < data.Length && end + 1 < limit)
+            {
+                if (data[end] == 0 && data[end + 1] == 0)
+                    break;
+                end += 2;
+            }
+
+            if (end == offset || end + 1 >= data.Length || end + 1 >= limit)
+                return null;
+
+            return DecodeUtf16Lossy(data, offset, end - offset);
+        }
+
+        private static string DecodeUtf16Lossy(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0)
+                return string.Empty;
+
+            return DecodeUtf16Lossy(bytes, 0, bytes.Length);
+        }
+
+        private static string DecodeUtf16Lossy(byte[] bytes, int offset, int length)
+        {
+            if (bytes == null || length <= 0)
+                return string.Empty;
+
+            int usableLength = length - length % 2;
+            if (usableLength == 0)
+                return string.Empty;
+
+            return Encoding.Unicode.GetString(bytes, offset, usableLength);
+        }
+
+        private static byte[] SliceBytes(byte[] data, int offset, int length)
+        {
+            var slice = new byte[length];
+            Buffer.BlockCopy(data, offset, slice, 0, length);
+            return slice;
+        }
+
+        private static ushort ReadUInt16(byte[] data, int offset, string filePath)
+        {
+            if (offset < 0 || offset + 2 > data.Length)
+                throw new DestListParseException(filePath, offset, $"Unexpected end of data at offset {offset}.");
+
+            return BitConverter.ToUInt16(data, offset);
+        }
+
+        private static uint ReadUInt32(byte[] data, int offset, string filePath)
+        {
+            if (offset < 0 || offset + 4 > data.Length)
+                throw new DestListParseException(filePath, offset, $"Unexpected end of data at offset {offset}.");
+
+            return BitConverter.ToUInt32(data, offset);
+        }
+
+        private static ulong ReadUInt64(byte[] data, int offset, string filePath)
+        {
+            if (offset < 0 || offset + 8 > data.Length)
+                throw new DestListParseException(filePath, offset, $"Unexpected end of data at offset {offset}.");
+
+            return BitConverter.ToUInt64(data, offset);
+        }
+
+        private static int ReadInt32(byte[] data, int offset, string filePath)
+        {
+            if (offset < 0 || offset + 4 > data.Length)
+                throw new DestListParseException(filePath, offset, $"Unexpected end of data at offset {offset}.");
+
+            return BitConverter.ToInt32(data, offset);
+        }
+
+        private static ulong? ReadOptionalUInt64(byte[] data, int offset)
+        {
+            if (offset < 0 || offset + 8 > data.Length)
+                return null;
+
+            return BitConverter.ToUInt64(data, offset);
+        }
+
+        private sealed class CompoundFile
+        {
+            private const uint EndOfChain = 0xFFFF_FFFE;
+            private const uint FreeSector = 0xFFFF_FFFF;
+
+            private readonly byte[] _data;
+            private readonly List<DirectoryEntry> _directory;
+            private readonly byte[] _rootStream;
+            private readonly List<uint> _fat;
+            private readonly List<uint> _miniFat;
+
+            private CompoundFile(
+                byte[] data,
+                int sectorSize,
+                int miniSectorSize,
+                uint miniCutoffSize,
+                List<uint> fat,
+                List<uint> miniFat,
+                List<DirectoryEntry> directory,
+                byte[] rootStream)
+            {
+                _data = data;
+                SectorSize = sectorSize;
+                MiniSectorSize = miniSectorSize;
+                MiniCutoffSize = miniCutoffSize;
+                _fat = fat;
+                _miniFat = miniFat;
+                _directory = directory;
+                _rootStream = rootStream;
+            }
+
+            public int SectorSize { get; }
+
+            public int MiniSectorSize { get; }
+
+            public uint MiniCutoffSize { get; }
+
+            internal List<DirectoryEntry> DirectoryEntries => _directory;
+
+            public static CompoundFile Parse(byte[] data, string filePath)
+            {
+                if (data.Length < 512)
+                    throw new DestListParseException(filePath, null, "file is too small for a CFB header");
+
+                byte[] magic = new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+                if (!data.Take(8).SequenceEqual(magic))
+                    throw new DestListParseException(filePath, null, "not an OLE Compound File Binary");
+
+                int sectorSizeShift = checked((int)ReadUInt16(data, 0x1e, filePath));
+                int sectorSize = 1 << sectorSizeShift;
+                if (sectorSize != 512 && sectorSize != 4096)
+                    throw new DestListParseException(filePath, null, "unsupported CFB sector size");
+
+                int miniSectorSizeShift = checked((int)ReadUInt16(data, 0x20, filePath));
+                int miniSectorSize = 1 << miniSectorSizeShift;
+                if (miniSectorSize != 64)
+                    throw new DestListParseException(filePath, null, "unsupported CFB mini sector size");
+
+                uint firstDirSector = ReadUInt32(data, 0x30, filePath);
+                uint miniCutoffSize = ReadUInt32(data, 0x38, filePath);
+                uint firstMiniFatSector = ReadUInt32(data, 0x3c, filePath);
+                uint numMiniFatSectors = ReadUInt32(data, 0x40, filePath);
+                uint firstDifatSector = ReadUInt32(data, 0x44, filePath);
+                uint numDifatSectors = ReadUInt32(data, 0x48, filePath);
+
+                var fatSectorIds = ReadDifat(data, sectorSize, firstDifatSector, numDifatSectors);
+                var fat = ReadFat(data, sectorSize, fatSectorIds);
+
+                byte[] directoryStream = ReadRegularStream(data, sectorSize, fat, firstDirSector, filePath);
+                List<DirectoryEntry> directory = ParseDirectory(directoryStream);
+                DirectoryEntry root = directory.FirstOrDefault(entry => entry.ObjectType == 5);
+                if (root == null)
+                    throw new DestListParseException(filePath, null, "root storage entry not found");
+
+                byte[] rootStream = ReadRegularStreamSized(
+                    data,
+                    sectorSize,
+                    fat,
+                    root.StartSector,
+                    checked((int)root.StreamSize),
+                    filePath);
+
+                List<uint> miniFat;
+                if (firstMiniFatSector == FreeSector || numMiniFatSectors == 0)
+                {
+                    miniFat = new List<uint>();
+                }
+                else
+                {
+                    byte[] miniFatBytes = ReadRegularStreamSized(
+                        data,
+                        sectorSize,
+                        fat,
+                        firstMiniFatSector,
+                        checked((int)numMiniFatSectors * sectorSize),
+                        filePath);
+
+                    miniFat = new List<uint>();
+                    for (int i = 0; i + 3 < miniFatBytes.Length; i += 4)
+                        miniFat.Add(BitConverter.ToUInt32(miniFatBytes, i));
+                }
+
+                return new CompoundFile(data, sectorSize, miniSectorSize, miniCutoffSize, fat, miniFat, directory, rootStream);
+            }
+
+            public byte[] Stream(string name)
+            {
+                DirectoryEntry entry = _directory.FirstOrDefault(
+                    e => e.ObjectType == 2 && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (entry == null)
+                    return null;
+
+                int size = checked((int)entry.StreamSize);
+                if (size < MiniCutoffSize)
+                    return ReadMiniStream(entry.StartSector, size);
+
+                return ReadRegularStreamSized(_data, SectorSize, _fat, entry.StartSector, size, null);
+            }
+
+            private byte[] ReadMiniStream(uint startSector, int size)
+            {
+                if (size == 0)
+                    return Array.Empty<byte>();
+
+                List<uint> chain = SectorChain(_miniFat, startSector);
+                var outBytes = new List<byte>(size);
+                foreach (uint miniSector in chain)
+                {
+                    int offset = checked((int)miniSector * MiniSectorSize);
+                    int end = offset + MiniSectorSize;
+                    if (offset < 0 || end > _rootStream.Length)
+                        throw new DestListParseException(null, offset, $"mini sector {miniSector} is out of bounds");
+
+                    byte[] sector = SliceBytes(_rootStream, offset, MiniSectorSize);
+                    outBytes.AddRange(sector);
+                    if (outBytes.Count >= size)
+                        break;
+                }
+
+                if (outBytes.Count > size)
+                    outBytes.RemoveRange(size, outBytes.Count - size);
+
+                return outBytes.ToArray();
+            }
+
+            private static List<uint> ReadDifat(byte[] data, int sectorSize, uint firstDifatSector, uint numDifatSectors)
+            {
+                var fatSectorIds = new List<uint>();
+                for (int index = 0; index < 109; index++)
+                {
+                    uint sectorId = BitConverter.ToUInt32(data, 0x4c + index * 4);
+                    if (sectorId != FreeSector)
+                        fatSectorIds.Add(sectorId);
+                }
+
+                uint nextDifatSector = firstDifatSector;
+                for (int i = 0; i < numDifatSectors; i++)
+                {
+                    if (nextDifatSector == FreeSector || nextDifatSector == EndOfChain)
+                        break;
+
+                    byte[] sector = SectorSlice(data, sectorSize, nextDifatSector);
+                    int entriesPerSector = sectorSize / 4;
+                    for (int index = 0; index < entriesPerSector - 1; index++)
+                    {
+                        uint sectorId = BitConverter.ToUInt32(sector, index * 4);
+                        if (sectorId != FreeSector)
+                            fatSectorIds.Add(sectorId);
+                    }
+
+                    nextDifatSector = BitConverter.ToUInt32(sector, (entriesPerSector - 1) * 4);
+                }
+
+                return fatSectorIds;
+            }
+
+            private static List<uint> ReadFat(byte[] data, int sectorSize, List<uint> fatSectorIds)
+            {
+                var fat = new List<uint>();
+                foreach (uint sectorId in fatSectorIds)
+                {
+                    byte[] sector = SectorSlice(data, sectorSize, sectorId);
+                    for (int i = 0; i + 3 < sector.Length; i += 4)
+                        fat.Add(BitConverter.ToUInt32(sector, i));
+                }
+
+                return fat;
+            }
+
+            private static List<uint> SectorChain(List<uint> fat, uint startSector)
+            {
+                if (startSector == FreeSector || startSector == EndOfChain)
+                    return new List<uint>();
+
+                var chain = new List<uint>();
+                var seen = new HashSet<uint>();
+                uint sector = startSector;
+
+                while (true)
+                {
+                    if (sector == EndOfChain)
+                        break;
+
+                    if (sector == FreeSector)
+                        throw new DestListParseException(null, null, $"invalid sector marker {sector:#x} in chain");
+
+                    int index = checked((int)sector);
+                    if (index >= fat.Count)
+                        throw new DestListParseException(null, null, $"sector {sector} is outside the FAT");
+
+                    if (!seen.Add(sector))
+                        throw new DestListParseException(null, null, $"loop detected in sector chain at sector {sector}");
+
+                    chain.Add(sector);
+                    sector = fat[index];
+                }
+
+                return chain;
+            }
+
+            private static byte[] ReadRegularStreamSized(
+                byte[] data,
+                int sectorSize,
+                List<uint> fat,
+                uint startSector,
+                int size,
+                string filePath)
+            {
+                byte[] stream = ReadRegularStream(data, sectorSize, fat, startSector, filePath);
+                if (stream.Length > size)
+                    Array.Resize(ref stream, size);
+                return stream;
+            }
+
+            private static byte[] ReadRegularStream(
+                byte[] data,
+                int sectorSize,
+                List<uint> fat,
+                uint startSector,
+                string filePath)
+            {
+                List<uint> chain = SectorChain(fat, startSector);
+                var outBytes = new List<byte>();
+                foreach (uint sectorId in chain)
+                    outBytes.AddRange(StreamSectorSlice(data, sectorSize, sectorId));
+
+                return outBytes.ToArray();
+            }
+
+            private static byte[] SectorSlice(byte[] data, int sectorSize, uint sectorId)
+            {
+                int offset = checked((int)(sectorId + 1) * sectorSize);
+                int end = checked(offset + sectorSize);
+                if (offset < 0 || end > data.Length)
+                    throw new DestListParseException(null, null, $"sector {sectorId} is out of bounds");
+
+                return SliceBytes(data, offset, sectorSize);
+            }
+
+            private static byte[] StreamSectorSlice(byte[] data, int sectorSize, uint sectorId)
+            {
+                int offset = checked((int)(sectorId + 1) * sectorSize);
+                if (offset >= data.Length)
+                    throw new DestListParseException(null, null, $"sector {sectorId} is out of bounds");
+
+                int end = Math.Min(checked(offset + sectorSize), data.Length);
+                return SliceBytes(data, offset, end - offset);
+            }
+
+            private static List<DirectoryEntry> ParseDirectory(byte[] directoryStream)
+            {
+                var entries = new List<DirectoryEntry>();
+                for (int offset = 0; offset + 128 <= directoryStream.Length; offset += 128)
+                {
+                    byte objectType = directoryStream[offset + 66];
+                    if (objectType == 0)
+                        continue;
+
+                    ushort nameLength = BitConverter.ToUInt16(directoryStream, offset + 64);
+                    string name = string.Empty;
+                    if (nameLength >= 2 && nameLength <= 64)
+                    {
+                        name = DecodeUtf16Lossy(directoryStream, offset, nameLength - 2);
+                    }
+
+                    entries.Add(new DirectoryEntry
+                    {
+                        Name = name,
+                        RawObjectType = objectType,
+                        StartSector = BitConverter.ToUInt32(directoryStream, offset + 116),
+                        StreamSize = BitConverter.ToUInt64(directoryStream, offset + 120)
+                    });
+                }
+
+                return entries;
+            }
+
+            internal sealed class DirectoryEntry
+            {
+                public string Name { get; set; }
+
+                public byte RawObjectType { get; set; }
+
+                public uint StartSector { get; set; }
+
+                public ulong StreamSize { get; set; }
+
+                public byte ObjectType => RawObjectType;
+            }
+        }
+    }
+}

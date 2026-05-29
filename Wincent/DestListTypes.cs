@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Wincent
 {
@@ -196,5 +197,110 @@ namespace Wincent
 
         /// <summary>Gets the serialized property store size.</summary>
         public uint? SerializedPropertyStoreSize { get; internal set; }
+    }
+
+    /// <summary>
+    /// Identifies an Explorer automatic destination family for experimental rebuild-based removal.
+    /// </summary>
+    public enum AutomaticDestinationsKind
+    {
+        /// <summary>
+        /// Recent Files automatic destinations.
+        /// </summary>
+        RecentFiles,
+
+        /// <summary>
+        /// Frequent Folders automatic destinations.
+        /// </summary>
+        FrequentFolders
+    }
+
+    /// <summary>
+    /// Configures experimental rebuild-based removal.
+    /// </summary>
+    public sealed class ExperimentalRemoveOptions
+    {
+        /// <summary>
+        /// Gets or sets the initial delay after deleting the automatic destination file.
+        /// </summary>
+        /// <remarks>
+        /// The implementation still polls for a rebuilt file after this delay.
+        /// </remarks>
+        public TimeSpan RebuildDelay { get; set; } = TimeSpan.FromMilliseconds(500);
+    }
+
+    /// <summary>
+    /// Describes an experimental rebuild-based removal result.
+    /// </summary>
+    public sealed class ExperimentalRemoveReport
+    {
+        internal ExperimentalRemoveReport(
+            AutomaticDestinationsKind kind,
+            string recentFolder,
+            string destinationPath,
+            IEnumerable<string> requestedPaths,
+            IEnumerable<string> matchingPathsBefore,
+            IEnumerable<string> deletedShortcutPaths,
+            IEnumerable<string> missingShortcutTargetPaths,
+            bool destinationDeleted,
+            bool rebuilt,
+            TimeSpan? rebuildParseElapsed,
+            string rebuildParseError,
+            IEnumerable<string> remainingPathsAfterRebuild,
+            bool success)
+        {
+            Kind = kind;
+            RecentFolder = recentFolder;
+            DestinationPath = destinationPath;
+            RequestedPaths = (requestedPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
+            MatchingPathsBefore = (matchingPathsBefore ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
+            DeletedShortcutPaths = (deletedShortcutPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
+            MissingShortcutTargetPaths = (missingShortcutTargetPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
+            DestinationDeleted = destinationDeleted;
+            Rebuilt = rebuilt;
+            RebuildParseElapsed = rebuildParseElapsed;
+            RebuildParseError = rebuildParseError;
+            RemainingPathsAfterRebuild = (remainingPathsAfterRebuild ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
+            Success = success;
+        }
+
+        /// <summary>Gets the automatic destination kind that was processed.</summary>
+        public AutomaticDestinationsKind Kind { get; }
+
+        /// <summary>Gets the current Windows Recent folder.</summary>
+        public string RecentFolder { get; }
+
+        /// <summary>Gets the automatic destination file path that was deleted and monitored.</summary>
+        public string DestinationPath { get; }
+
+        /// <summary>Gets target paths requested by the caller.</summary>
+        public IReadOnlyList<string> RequestedPaths { get; }
+
+        /// <summary>Gets DestList paths that matched before deletion started.</summary>
+        public IReadOnlyList<string> MatchingPathsBefore { get; }
+
+        /// <summary>Gets Recent shortcut files deleted during removal.</summary>
+        public IReadOnlyList<string> DeletedShortcutPaths { get; }
+
+        /// <summary>Gets requested target paths that had no matching Recent shortcut file.</summary>
+        public IReadOnlyList<string> MissingShortcutTargetPaths { get; }
+
+        /// <summary>Gets whether the automatic destination file was deleted.</summary>
+        public bool DestinationDeleted { get; }
+
+        /// <summary>Gets whether Explorer rebuilt the automatic destination file during polling.</summary>
+        public bool Rebuilt { get; }
+
+        /// <summary>Gets the time spent waiting until the rebuilt file could be parsed.</summary>
+        public TimeSpan? RebuildParseElapsed { get; }
+
+        /// <summary>Gets the last parse error observed while waiting for the rebuilt file.</summary>
+        public string RebuildParseError { get; }
+
+        /// <summary>Gets matching paths still present after Explorer rebuilt the file.</summary>
+        public IReadOnlyList<string> RemainingPathsAfterRebuild { get; }
+
+        /// <summary>Gets whether all requested entries were absent after rebuild.</summary>
+        public bool Success { get; }
     }
 }

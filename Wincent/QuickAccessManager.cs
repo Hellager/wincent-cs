@@ -123,6 +123,7 @@ namespace Wincent
         private readonly IRecentLinksCleaner _recentLinksCleaner;
         private readonly IQuickAccessLockFactory _lockFactory;
         private readonly IQuickAccessVisibility _visibility;
+        private readonly IDestListMetadataReader _destListReader;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -159,7 +160,8 @@ namespace Wincent
                       new WindowsRecentFolder(new DefaultNativeMethods()),
                       new DefaultRecentLinkFileSystem(),
                       new NativeQuickAccessBackingFileHandleOpener()),
-                  new RegistryQuickAccessVisibility(new CurrentUserExplorerVisibilityRegistry()))
+                  new RegistryQuickAccessVisibility(new CurrentUserExplorerVisibilityRegistry()),
+                  new DefaultDestListMetadataReader())
         {
         }
 
@@ -182,7 +184,8 @@ namespace Wincent
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility())
+                  new NoOpQuickAccessVisibility(),
+                  new NoOpDestListMetadataReader())
         {
         }
 
@@ -205,7 +208,8 @@ namespace Wincent
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility())
+                  new NoOpQuickAccessVisibility(),
+                  new NoOpDestListMetadataReader())
         {
         }
 
@@ -229,7 +233,8 @@ namespace Wincent
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility())
+                  new NoOpQuickAccessVisibility(),
+                  new NoOpDestListMetadataReader())
         {
         }
 
@@ -254,7 +259,8 @@ namespace Wincent
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility())
+                  new NoOpQuickAccessVisibility(),
+                  new NoOpDestListMetadataReader())
         {
         }
 
@@ -280,7 +286,8 @@ namespace Wincent
                   explorerRefresher,
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility())
+                  new NoOpQuickAccessVisibility(),
+                  new NoOpDestListMetadataReader())
         {
         }
 
@@ -307,7 +314,8 @@ namespace Wincent
                   explorerRefresher,
                   recentLinksCleaner,
                   new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility())
+                  new NoOpQuickAccessVisibility(),
+                  new NoOpDestListMetadataReader())
         {
         }
 
@@ -335,7 +343,8 @@ namespace Wincent
                   explorerRefresher,
                   recentLinksCleaner,
                   lockFactory,
-                  new NoOpQuickAccessVisibility())
+                  new NoOpQuickAccessVisibility(),
+                  new NoOpDestListMetadataReader())
         {
         }
 
@@ -352,6 +361,37 @@ namespace Wincent
             IRecentLinksCleaner recentLinksCleaner,
             IQuickAccessLockFactory lockFactory,
             IQuickAccessVisibility visibility)
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  nativeQuery,
+                  nativeMutation,
+                  explorerRefresher,
+                  recentLinksCleaner,
+                  lockFactory,
+                  visibility,
+                  new NoOpDestListMetadataReader())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery,
+            IQuickAccessNativeMutation nativeMutation,
+            IExplorerRefresher explorerRefresher,
+            IRecentLinksCleaner recentLinksCleaner,
+            IQuickAccessLockFactory lockFactory,
+            IQuickAccessVisibility visibility,
+            IDestListMetadataReader destListReader)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -368,6 +408,7 @@ namespace Wincent
             _recentLinksCleaner = recentLinksCleaner ?? throw new ArgumentNullException(nameof(recentLinksCleaner));
             _lockFactory = lockFactory ?? throw new ArgumentNullException(nameof(lockFactory));
             _visibility = visibility ?? throw new ArgumentNullException(nameof(visibility));
+            _destListReader = destListReader ?? throw new ArgumentNullException(nameof(destListReader));
         }
 
         /// <summary>
@@ -862,6 +903,36 @@ namespace Wincent
         public void HideSection(QuickAccess target)
         {
             SetVisible(target, false);
+        }
+
+        /// <summary>
+        /// Parses Recent Files DestList metadata.
+        /// </summary>
+        /// <returns>The Recent Files DestList entries.</returns>
+        /// <exception cref="IOException">The backing file cannot be read.</exception>
+        /// <exception cref="DestListParseException">The backing file is malformed or truncated.</exception>
+        /// <exception cref="DestListUnsupportedVersionException">The DestList version is unsupported.</exception>
+        /// <remarks>
+        /// This method reads Explorer's `.automaticDestinations-ms` backing file for the current Windows user.
+        /// </remarks>
+        public IReadOnlyList<DestListEntry> GetRecentFilesMetadata()
+        {
+            return _destListReader.ParseFile(_dataFiles.RecentFilesPath).DestList.Entries;
+        }
+
+        /// <summary>
+        /// Parses Frequent Folders DestList metadata.
+        /// </summary>
+        /// <returns>The Frequent Folders DestList entries.</returns>
+        /// <exception cref="IOException">The backing file cannot be read.</exception>
+        /// <exception cref="DestListParseException">The backing file is malformed or truncated.</exception>
+        /// <exception cref="DestListUnsupportedVersionException">The DestList version is unsupported.</exception>
+        /// <remarks>
+        /// This method reads Explorer's `.automaticDestinations-ms` backing file for the current Windows user.
+        /// </remarks>
+        public IReadOnlyList<DestListEntry> GetFrequentFoldersMetadata()
+        {
+            return _destListReader.ParseFile(_dataFiles.FrequentFoldersPath).DestList.Entries;
         }
 
         /// <summary>
