@@ -91,6 +91,55 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void GetItems_NativeSuccess_DoesNotUsePowerShellFallback()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.RecentFiles))
+                .Returns(new List<string> { @"C:\native.txt" });
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object);
+
+            var result = _manager.GetItems(QuickAccess.RecentFiles);
+
+            CollectionAssert.AreEqual(new[] { @"C:\native.txt" }, result.ToList());
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, It.IsAny<int>()), Times.Never);
+        }
+
+        [TestMethod]
+        public void GetItems_NativeFailure_FallsBackToPowerShell()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.FrequentFolders))
+                .Throws(new InvalidOperationException("native failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\fallback" });
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object);
+
+            var result = _manager.GetItems(QuickAccess.FrequentFolders);
+
+            CollectionAssert.AreEqual(new[] { @"C:\fallback" }, result.ToList());
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void GetItems_NativeAndPowerShellFailure_ThrowsPowerShellExecutionException()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.All))
+                .Throws(new InvalidOperationException("native failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.QueryQuickAccess, PowerShellErrorKind.ProcessFailed, "fallback failed"));
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object);
+
+            var exception = Assert.ThrowsException<PowerShellExecutionException>(
+                () => _manager.GetItems(QuickAccess.All));
+
+            Assert.AreEqual(PowerShellOperation.QueryQuickAccess, exception.Operation);
+        }
+
+        [TestMethod]
         public void QuickAccess_EnumValues_PreserveLegacyNumericValues()
         {
             Assert.AreEqual(0, (int)QuickAccess.All);
@@ -109,10 +158,35 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void ContainsItem_NativeResult_UsesCaseSensitiveSubstring()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.RecentFiles))
+                .Returns(new List<string> { @"C:\NativeCaseSensitive.txt" });
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object);
+
+            Assert.IsTrue(_manager.ContainsItem("Sensitive", QuickAccess.RecentFiles));
+            Assert.IsFalse(_manager.ContainsItem("sensitive", QuickAccess.RecentFiles));
+        }
+
+        [TestMethod]
         public void ContainsItemExact_UsesWindowsPathSemantics()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder\" });
+
+            Assert.IsTrue(_manager.ContainsItemExact(@"c:/folder", QuickAccess.FrequentFolders));
+        }
+
+        [TestMethod]
+        public void ContainsItemExact_NativeResult_UsesWindowsPathSemantics()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.FrequentFolders))
+                .Returns(new List<string> { @"C:\Folder\" });
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object);
 
             Assert.IsTrue(_manager.ContainsItemExact(@"c:/folder", QuickAccess.FrequentFolders));
         }
@@ -508,6 +582,18 @@ namespace TestWincent
                 null,
                 TimeSpan.FromMilliseconds(1),
                 null);
+        }
+
+        private QuickAccessManager CreateManager(IQuickAccessNativeQuery nativeQuery)
+        {
+            return new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                RetryPolicy.Standard,
+                nativeQuery);
         }
     }
 }

@@ -117,6 +117,7 @@ namespace Wincent
         private readonly IFileSystemOperations _fileSystem;
         private readonly INativeMethods _nativeMethods;
         private readonly IQuickAccessDataFiles _dataFiles;
+        private readonly IQuickAccessNativeQuery _nativeQuery;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -139,7 +140,8 @@ namespace Wincent
                   new DefaultFileSystemOperations(),
                   new DefaultNativeMethods(),
                   new QuickAccessDataFiles(),
-                  options.RetryPolicy ?? RetryPolicy.Standard)
+                  options.RetryPolicy ?? RetryPolicy.Standard,
+                  new ShellQuickAccessNativeQuery(new DefaultNativeMethods()))
         {
         }
 
@@ -149,7 +151,8 @@ namespace Wincent
             IFileSystemOperations fileSystem,
             INativeMethods nativeMethods,
             IQuickAccessDataFiles dataFiles)
-            : this(executor, timeout, fileSystem, nativeMethods, dataFiles, RetryPolicy.Standard)
+            // Dependency-injected instances keep the legacy PowerShell query path unless a native seam is supplied.
+            : this(executor, timeout, fileSystem, nativeMethods, dataFiles, RetryPolicy.Standard, new PowerShellFallbackNativeQuery())
         {
         }
 
@@ -160,6 +163,18 @@ namespace Wincent
             INativeMethods nativeMethods,
             IQuickAccessDataFiles dataFiles,
             RetryPolicy retryPolicy)
+            : this(executor, timeout, fileSystem, nativeMethods, dataFiles, retryPolicy, new PowerShellFallbackNativeQuery())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -170,6 +185,7 @@ namespace Wincent
             _nativeMethods = nativeMethods ?? throw new ArgumentNullException(nameof(nativeMethods));
             _dataFiles = dataFiles ?? throw new ArgumentNullException(nameof(dataFiles));
             _retryPolicy = retryPolicy ?? throw new ArgumentNullException(nameof(retryPolicy));
+            _nativeQuery = nativeQuery ?? throw new ArgumentNullException(nameof(nativeQuery));
         }
 
         /// <summary>
@@ -192,7 +208,14 @@ namespace Wincent
         public IReadOnlyList<string> GetItems(QuickAccess target)
         {
             var script = MapQueryScript(target);
-            return ExecuteListScript(script, null, ToTimeoutSeconds());
+            try
+            {
+                return _nativeQuery.GetItems(target);
+            }
+            catch (Exception)
+            {
+                return ExecuteListScript(script, null, ToTimeoutSeconds());
+            }
         }
 
         /// <summary>
