@@ -15,6 +15,7 @@ using Moq;
 namespace TestWincent
 {
     [TestClass]
+    [TestCategory("Process")]
     public class TestScriptExecutor
     {
         private ScriptExecutor _executor;

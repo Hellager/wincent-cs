@@ -363,8 +363,61 @@ namespace TestWincent
 
             Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Async", StringComparison.Ordinal)));
             Assert.IsFalse(managerMethods.Any(m => m.Name == "ClearCache"));
+            Assert.IsFalse(managerMethods.Any(m => m.Name.StartsWith("Lock", StringComparison.Ordinal)));
+            Assert.IsFalse(managerMethods.Any(m => m.Name.Contains("Visible")));
+            Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Metadata", StringComparison.Ordinal)));
             Assert.IsNull(assembly.GetType("Wincent.IQuickAccessManager"));
             Assert.IsNull(assembly.GetType("Wincent.ExecutionFeasibilityStatus"));
+        }
+
+        [TestMethod]
+        public void PublicApi_ExportsOnlyPhase0Surface()
+        {
+            var expected = new List<string>
+            {
+                "Wincent.AddOptions",
+                "Wincent.AutomaticDestinations",
+                "Wincent.BatchFailure",
+                "Wincent.BatchOptions",
+                "Wincent.BatchResult",
+                "Wincent.CfbDirectoryEntry",
+                "Wincent.CfbInfo",
+                "Wincent.CfbObjectType",
+                "Wincent.ClearOptions",
+                "Wincent.ComApartmentMismatchException",
+                "Wincent.DestList",
+                "Wincent.DestListEntry",
+                "Wincent.DestListParseException",
+                "Wincent.DestListUnsupportedVersionException",
+                "Wincent.PartialClearException",
+                "Wincent.PowerShellErrorKind",
+                "Wincent.PowerShellExecutionException",
+                "Wincent.PowerShellOperation",
+                "Wincent.QuickAccess",
+                "Wincent.QuickAccessItem",
+                "Wincent.QuickAccessItemAlreadyExistsException",
+                "Wincent.QuickAccessItemNotFoundException",
+                "Wincent.QuickAccessLockTarget",
+                "Wincent.QuickAccessManager",
+                "Wincent.QuickAccessManagerOptions",
+                "Wincent.QuickAccessOperationException",
+                "Wincent.QuickAccessUnlockFailure",
+                "Wincent.QuickAccessUnlockOptions",
+                "Wincent.QuickAccessUnlockReport",
+                "Wincent.RemoveOptions",
+                "Wincent.RetryPolicy",
+                "Wincent.UnsupportedQuickAccessOperationException",
+                "Wincent.WincentException"
+            };
+
+            var exported = typeof(QuickAccessManager).Assembly
+                .GetExportedTypes()
+                .Select(t => t.FullName)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+
+            expected.Sort(StringComparer.Ordinal);
+            CollectionAssert.AreEqual(expected, exported);
         }
     }
 }
