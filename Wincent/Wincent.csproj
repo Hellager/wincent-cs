@@ -61,6 +61,7 @@
     <Compile Include="QuickAccessManager.cs" />
     <Compile Include="QuickAccessNativeMutation.cs" />
     <Compile Include="QuickAccessNativeQuery.cs" />
+    <Compile Include="QuickAccessVisibility.cs" />
     <Compile Include="RecentLinksCleaner.cs" />
     <Compile Include="ScriptExecutor.cs" />
     <Compile Include="ScriptStorage.cs" />

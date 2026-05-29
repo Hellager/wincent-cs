@@ -122,6 +122,7 @@ namespace Wincent
         private readonly IExplorerRefresher _explorerRefresher;
         private readonly IRecentLinksCleaner _recentLinksCleaner;
         private readonly IQuickAccessLockFactory _lockFactory;
+        private readonly IQuickAccessVisibility _visibility;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -157,7 +158,8 @@ namespace Wincent
                       new QuickAccessDataFiles(),
                       new WindowsRecentFolder(new DefaultNativeMethods()),
                       new DefaultRecentLinkFileSystem(),
-                      new NativeQuickAccessBackingFileHandleOpener()))
+                      new NativeQuickAccessBackingFileHandleOpener()),
+                  new RegistryQuickAccessVisibility(new CurrentUserExplorerVisibilityRegistry()))
         {
         }
 
@@ -179,7 +181,8 @@ namespace Wincent
                   new PowerShellFallbackNativeMutation(),
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory())
+                  new NoOpQuickAccessLockFactory(),
+                  new NoOpQuickAccessVisibility())
         {
         }
 
@@ -201,7 +204,8 @@ namespace Wincent
                   new PowerShellFallbackNativeMutation(),
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory())
+                  new NoOpQuickAccessLockFactory(),
+                  new NoOpQuickAccessVisibility())
         {
         }
 
@@ -224,7 +228,8 @@ namespace Wincent
                   new PowerShellFallbackNativeMutation(),
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory())
+                  new NoOpQuickAccessLockFactory(),
+                  new NoOpQuickAccessVisibility())
         {
         }
 
@@ -248,7 +253,8 @@ namespace Wincent
                   nativeMutation,
                   new PowerShellFallbackExplorerRefresher(),
                   new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory())
+                  new NoOpQuickAccessLockFactory(),
+                  new NoOpQuickAccessVisibility())
         {
         }
 
@@ -273,7 +279,8 @@ namespace Wincent
                   nativeMutation,
                   explorerRefresher,
                   new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory())
+                  new NoOpQuickAccessLockFactory(),
+                  new NoOpQuickAccessVisibility())
         {
         }
 
@@ -299,7 +306,8 @@ namespace Wincent
                   nativeMutation,
                   explorerRefresher,
                   recentLinksCleaner,
-                  new NoOpQuickAccessLockFactory())
+                  new NoOpQuickAccessLockFactory(),
+                  new NoOpQuickAccessVisibility())
         {
         }
 
@@ -315,6 +323,35 @@ namespace Wincent
             IExplorerRefresher explorerRefresher,
             IRecentLinksCleaner recentLinksCleaner,
             IQuickAccessLockFactory lockFactory)
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  nativeQuery,
+                  nativeMutation,
+                  explorerRefresher,
+                  recentLinksCleaner,
+                  lockFactory,
+                  new NoOpQuickAccessVisibility())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery,
+            IQuickAccessNativeMutation nativeMutation,
+            IExplorerRefresher explorerRefresher,
+            IRecentLinksCleaner recentLinksCleaner,
+            IQuickAccessLockFactory lockFactory,
+            IQuickAccessVisibility visibility)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -330,6 +367,7 @@ namespace Wincent
             _explorerRefresher = explorerRefresher ?? throw new ArgumentNullException(nameof(explorerRefresher));
             _recentLinksCleaner = recentLinksCleaner ?? throw new ArgumentNullException(nameof(recentLinksCleaner));
             _lockFactory = lockFactory ?? throw new ArgumentNullException(nameof(lockFactory));
+            _visibility = visibility ?? throw new ArgumentNullException(nameof(visibility));
         }
 
         /// <summary>
@@ -762,6 +800,68 @@ namespace Wincent
         public QuickAccessLock LockFrequentFolders()
         {
             return _lockFactory.Lock(QuickAccessLockTarget.FrequentFolders);
+        }
+
+        /// <summary>
+        /// Gets whether a Quick Access section is visible in Explorer.
+        /// </summary>
+        /// <param name="target">The section to inspect.</param>
+        /// <returns><see langword="true"/> when the requested section is visible.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <remarks>
+        /// This method reads the current Windows user's Explorer registry settings. Missing registry values are treated
+        /// as visible.
+        /// </remarks>
+        /// <seealso cref="SetVisible(QuickAccess, bool)"/>
+        public bool IsVisible(QuickAccess target)
+        {
+            return _visibility.IsVisible(target);
+        }
+
+        /// <summary>
+        /// Sets whether a Quick Access section is visible in Explorer.
+        /// </summary>
+        /// <param name="target">The section to update.</param>
+        /// <param name="visible">Whether the section should be visible.</param>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <remarks>
+        /// This method writes the current Windows user's Explorer registry settings. It does not refresh Explorer
+        /// windows or simulate the Folder Options UI, so already-open windows may not immediately reflect the change.
+        /// </remarks>
+        /// <seealso cref="IsVisible(QuickAccess)"/>
+        public void SetVisible(QuickAccess target, bool visible)
+        {
+            _visibility.SetVisible(target, visible);
+        }
+
+        /// <summary>
+        /// Shows a Quick Access section in Explorer.
+        /// </summary>
+        /// <param name="target">The section to show.</param>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <remarks>
+        /// This method writes the current Windows user's Explorer registry settings. It does not refresh Explorer
+        /// windows or simulate the Folder Options UI.
+        /// </remarks>
+        /// <seealso cref="SetVisible(QuickAccess, bool)"/>
+        public void ShowSection(QuickAccess target)
+        {
+            SetVisible(target, true);
+        }
+
+        /// <summary>
+        /// Hides a Quick Access section in Explorer.
+        /// </summary>
+        /// <param name="target">The section to hide.</param>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <remarks>
+        /// This method writes the current Windows user's Explorer registry settings. It does not refresh Explorer
+        /// windows or simulate the Folder Options UI.
+        /// </remarks>
+        /// <seealso cref="SetVisible(QuickAccess, bool)"/>
+        public void HideSection(QuickAccess target)
+        {
+            SetVisible(target, false);
         }
 
         /// <summary>

@@ -914,6 +914,59 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void IsVisible_DelegatesToVisibilityService()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.IsVisible(QuickAccess.RecentFiles)).Returns(false);
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            var result = _manager.IsVisible(QuickAccess.RecentFiles);
+
+            Assert.IsFalse(result);
+            visibility.Verify(v => v.IsVisible(QuickAccess.RecentFiles), Times.Once);
+        }
+
+        [TestMethod]
+        public void SetVisible_DelegatesToVisibilityService()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.FrequentFolders, false));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.SetVisible(QuickAccess.FrequentFolders, false);
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.FrequentFolders, false), Times.Once);
+        }
+
+        [TestMethod]
+        public void ShowSection_SetsVisibleTrue()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.All, true));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.ShowSection(QuickAccess.All);
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.All, true), Times.Once);
+        }
+
+        [TestMethod]
+        public void HideSection_SetsVisibleFalse()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.All, false));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.HideSection(QuickAccess.All);
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.All, false), Times.Once);
+        }
+
+        [TestMethod]
         public void PublicApi_DoesNotExposeRemovedPhase0Surface()
         {
             var assembly = typeof(QuickAccessManager).Assembly;
@@ -921,7 +974,6 @@ namespace TestWincent
 
             Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Async", StringComparison.Ordinal)));
             Assert.IsFalse(managerMethods.Any(m => m.Name == "ClearCache"));
-            Assert.IsFalse(managerMethods.Any(m => m.Name.Contains("Visible")));
             Assert.IsFalse(managerMethods.Any(m => m.Name.EndsWith("Metadata", StringComparison.Ordinal)));
             Assert.IsNull(assembly.GetType("Wincent.IQuickAccessManager"));
             Assert.IsNull(assembly.GetType("Wincent.ExecutionFeasibilityStatus"));
@@ -1021,6 +1073,23 @@ namespace TestWincent
                 _explorerRefresher.Object,
                 _recentLinksCleaner.Object,
                 lockFactory);
+        }
+
+        private QuickAccessManager CreateManager(IQuickAccessVisibility visibility)
+        {
+            return new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                RetryPolicy.Standard,
+                new PowerShellFallbackNativeQuery(),
+                _nativeMutation.Object,
+                _explorerRefresher.Object,
+                _recentLinksCleaner.Object,
+                new NoOpQuickAccessLockFactory(),
+                visibility);
         }
 
         private static QuickAccessLock CreateEmptyLock(QuickAccessLockTarget target)
