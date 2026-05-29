@@ -226,7 +226,7 @@ namespace Wincent
             if (path == null)
                 throw new ArgumentNullException(nameof(path));
 
-            return GetItems(target).Any(item => PathsEqual(item, path));
+            return GetItems(target).Any(item => WindowsPathComparer.Equals(item, path));
         }
 
         /// <summary>
@@ -674,53 +674,33 @@ namespace Wincent
         private void AddFileToRecentDocs(string filePath)
         {
             IntPtr pathPtr = IntPtr.Zero;
-            bool comInitialized = false;
 
             try
             {
-                int hr = _nativeMethods.CoInitializeEx(
-                    IntPtr.Zero,
-                    NativeMethods.COINIT_APARTMENTTHREADED | NativeMethods.COINIT_DISABLE_OLE1DDE);
-
-                if (hr < 0)
-                    throw new ComApartmentMismatchException(hr);
-
-                comInitialized = true;
-                pathPtr = Marshal.StringToHGlobalUni(filePath);
-                _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, pathPtr);
+                using (ComGuard.InitializeSta(_nativeMethods, disableOle1Dde: true))
+                {
+                    pathPtr = Marshal.StringToHGlobalUni(filePath);
+                    _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, pathPtr);
+                }
             }
             finally
             {
                 if (pathPtr != IntPtr.Zero)
                     Marshal.FreeHGlobal(pathPtr);
-
-                if (comInitialized)
-                    _nativeMethods.CoUninitialize();
             }
         }
 
         private void ClearRecentFiles()
         {
-            bool comInitialized = false;
-            try
+            using (ComGuard.InitializeSta(_nativeMethods, disableOle1Dde: true))
             {
-                int hr = _nativeMethods.CoInitializeEx(IntPtr.Zero, NativeMethods.COINIT_APARTMENTTHREADED);
-                if (hr < 0)
-                    throw new ComApartmentMismatchException(hr);
-
-                comInitialized = true;
                 _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, IntPtr.Zero);
-            }
-            finally
-            {
-                if (comInitialized)
-                    _nativeMethods.CoUninitialize();
             }
         }
 
         private void ClearFrequentFolders(bool removePinnedFolders)
         {
-            var recentFolder = GetKnownFolderPath(NativeMethods.FOLDERID_Recent);
+            var recentFolder = new WindowsRecentFolder(_nativeMethods, _fileSystem).GetPath();
             var jumpListFile = Path.Combine(
                 recentFolder,
                 "AutomaticDestinations",
@@ -731,24 +711,6 @@ namespace Wincent
 
             if (removePinnedFolders)
                 ExecuteMutationScript(PSScript.EmptyPinnedFolders, null, PowerShellOperation.ClearPinnedFolders);
-        }
-
-        private string GetKnownFolderPath(Guid knownFolderId)
-        {
-            IntPtr pPath = IntPtr.Zero;
-            try
-            {
-                int hr = _nativeMethods.SHGetKnownFolderPath(knownFolderId, 0, IntPtr.Zero, out pPath);
-                if (hr != 0)
-                    throw new Win32Exception(hr);
-
-                return Marshal.PtrToStringUni(pPath);
-            }
-            finally
-            {
-                if (pPath != IntPtr.Zero)
-                    _nativeMethods.CoTaskMemFree(pPath);
-            }
         }
 
         private void TryRefreshExplorer(bool shouldRefresh)
@@ -764,29 +726,6 @@ namespace Wincent
             {
                 // Partial clear preserves the original failure.
             }
-        }
-
-        private static bool PathsEqual(string left, string right)
-        {
-            return string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string NormalizePath(string path)
-        {
-            if (path == null)
-                return null;
-
-            string normalized = path.Replace('/', '\\').TrimEnd('\\');
-            try
-            {
-                normalized = Path.GetFullPath(normalized).TrimEnd('\\');
-            }
-            catch (Exception)
-            {
-                // Fall back to lightweight normalization for paths that cannot be canonicalized.
-            }
-
-            return normalized;
         }
     }
 }

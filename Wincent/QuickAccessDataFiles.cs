@@ -84,29 +84,21 @@ namespace Wincent
         /// </summary>
         /// <param name="fileSystem">File system interface</param>
         public QuickAccessDataFiles(IFileSystem fileSystem)
+            : this(fileSystem, new WindowsRecentFolder(new DefaultNativeMethods()))
+        {
+        }
+
+        internal QuickAccessDataFiles(IFileSystem fileSystem, IWindowsRecentFolder recentFolder)
         {
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+            if (recentFolder == null)
+                throw new ArgumentNullException(nameof(recentFolder));
 
-            string recentFolder = GetWindowsRecentFolder();
-            string automaticDestDir = Path.Combine(recentFolder, "AutomaticDestinations");
+            string recentFolderPath = recentFolder.GetPath();
+            string automaticDestDir = Path.Combine(recentFolderPath, "AutomaticDestinations");
 
             _recentFilesPath = Path.Combine(automaticDestDir, "5f7b5f1e01b83767.automaticDestinations-ms");
             _frequentFoldersPath = Path.Combine(automaticDestDir, "f01b4d95cf55d32a.automaticDestinations-ms");
-        }
-
-        /// <summary>
-        /// Gets path to Windows Recent folder
-        /// </summary>
-        /// <returns>Recent folder path</returns>
-        /// <exception cref="InvalidPathException">Thrown when path retrieval fails</exception>
-        private string GetWindowsRecentFolder()
-        {
-            string recentFolder = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
-            if (string.IsNullOrEmpty(recentFolder))
-            {
-                throw new InvalidPathException("Windows Recent Folder", "Unable to retrieve Windows Recent folder path");
-            }
-            return recentFolder;
         }
 
         /// <summary>

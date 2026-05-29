@@ -250,6 +250,10 @@ namespace TestWincent
         {
             _manager.ClearItems(QuickAccess.RecentFiles);
 
+            _nativeMethods.Verify(n => n.CoInitializeEx(
+                IntPtr.Zero,
+                (uint)(NativeMethods.COINIT_APARTMENTTHREADED | NativeMethods.COINIT_DISABLE_OLE1DDE)),
+                Times.Once);
             _nativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), IntPtr.Zero), Times.Once);
             _executor.Verify(e => e.ClearCache(), Times.Once);
         }

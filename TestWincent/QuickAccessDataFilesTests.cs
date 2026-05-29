@@ -98,6 +98,22 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void Constructor_UsesInjectedRecentFolderProvider()
+        {
+            var mockFileSystem = new MockFileSystem();
+            var quickAccess = new QuickAccessDataFiles(
+                mockFileSystem,
+                new StubRecentFolder(@"C:\InjectedRecent"));
+
+            Assert.AreEqual(
+                @"C:\InjectedRecent\AutomaticDestinations\5f7b5f1e01b83767.automaticDestinations-ms",
+                quickAccess.RecentFilesPath);
+            Assert.AreEqual(
+                @"C:\InjectedRecent\AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms",
+                quickAccess.FrequentFoldersPath);
+        }
+
+        [TestMethod]
         public void RemoveRecentFile_FileDoesNotExist_DoesNotDeleteFile()
         {
             // Arrange
@@ -366,6 +382,21 @@ namespace TestWincent
         public DateTime GetLastWriteTime(string path)
         {
             throw new IOException("测试获取时间异常");
+        }
+    }
+
+    internal sealed class StubRecentFolder : IWindowsRecentFolder
+    {
+        private readonly string _path;
+
+        public StubRecentFolder(string path)
+        {
+            _path = path;
+        }
+
+        public string GetPath()
+        {
+            return _path;
         }
     }
 }
