@@ -515,7 +515,7 @@ namespace Wincent
 
             var succeeded = new List<QuickAccessItem>();
             var failed = new List<BatchFailure>();
-            bool refreshRecentFiles = false;
+            int refreshRecentItemIndex = -1;
 
             foreach (var item in items)
             {
@@ -526,7 +526,8 @@ namespace Wincent
                 {
                     AddItem(item.Path, item.Target, new AddOptions());
                     succeeded.Add(item);
-                    refreshRecentFiles |= options.RefreshRecentFiles && item.Target == QuickAccess.RecentFiles;
+                    if (options.RefreshRecentFiles && item.Target == QuickAccess.RecentFiles)
+                        refreshRecentItemIndex = succeeded.Count - 1;
                 }
                 catch (Exception ex)
                 {
@@ -534,8 +535,19 @@ namespace Wincent
                 }
             }
 
-            if (refreshRecentFiles)
-                _dataFiles.RemoveRecentFile();
+            if (refreshRecentItemIndex >= 0)
+            {
+                try
+                {
+                    _dataFiles.RemoveRecentFile();
+                }
+                catch (Exception ex)
+                {
+                    var item = succeeded[refreshRecentItemIndex];
+                    succeeded.RemoveAt(refreshRecentItemIndex);
+                    failed.Add(new BatchFailure(item, ex));
+                }
+            }
 
             return new BatchResult(succeeded, failed);
         }

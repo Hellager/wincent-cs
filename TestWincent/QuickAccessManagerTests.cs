@@ -681,6 +681,7 @@ namespace TestWincent
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\exists.txt" });
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
 
             var result = _manager.AddItems(new[]
             {
@@ -692,6 +693,144 @@ namespace TestWincent
             Assert.AreEqual(1, result.Succeeded.Count);
             Assert.AreEqual(1, result.Failed.Count);
             Assert.IsTrue(result.HasPartialSuccess);
+            _nativeMutation.Verify(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItems_CoalescesRecentRefreshOnceAfterSuccessfulRecentAdds()
+        {
+            var result = _manager.AddItems(
+                new[]
+                {
+                    QuickAccessItem.RecentFile(@"C:\one.txt"),
+                    QuickAccessItem.RecentFile(@"C:\two.txt")
+                },
+                new BatchOptions { RefreshRecentFiles = true });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(2, result.Succeeded.Count);
+            Assert.AreEqual(0, result.Failed.Count);
+            _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItems_DoesNotRefreshWhenAllRecentAddsFail()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\one.txt", @"C:\two.txt" });
+
+            var result = _manager.AddItems(
+                new[]
+                {
+                    QuickAccessItem.RecentFile(@"C:\one.txt"),
+                    QuickAccessItem.RecentFile(@"C:\two.txt")
+                },
+                new BatchOptions { RefreshRecentFiles = true });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(0, result.Succeeded.Count);
+            Assert.AreEqual(2, result.Failed.Count);
+            _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Never);
+        }
+
+        [TestMethod]
+        public void AddItems_DoesNotRefreshWhenOnlyFrequentFoldersSucceed()
+        {
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
+
+            var result = _manager.AddItems(
+                new[] { QuickAccessItem.FrequentFolder(@"C:\Folder") },
+                new BatchOptions { RefreshRecentFiles = true });
+
+            Assert.AreEqual(1, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreEqual(0, result.Failed.Count);
+            _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Never);
+        }
+
+        [TestMethod]
+        public void AddItems_RefreshFailureRecordsPerItemFailure()
+        {
+            var recent = QuickAccessItem.RecentFile(@"C:\recent.txt");
+            var folder = QuickAccessItem.FrequentFolder(@"C:\Folder");
+            var refreshError = new IOException("refresh failed");
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
+            _dataFiles.Setup(d => d.RemoveRecentFile()).Throws(refreshError);
+
+            var result = _manager.AddItems(
+                new[] { recent, folder },
+                new BatchOptions { RefreshRecentFiles = true });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreSame(folder, result.Succeeded[0]);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.AreSame(recent, result.Failed[0].Item);
+            Assert.AreSame(refreshError, result.Failed[0].Error);
+        }
+
+        [TestMethod]
+        public void RemoveItems_DeepCleanFailureRecordsPerItemFailureAndContinues()
+        {
+            var failing = QuickAccessItem.RecentFile(@"C:\failing.txt");
+            var succeeding = QuickAccessItem.RecentFile(@"C:\succeeding.txt");
+            var cleanupError = new IOException("delete failed");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { failing.Path, succeeding.Path });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(failing.Path, TimeSpan.FromSeconds(10)));
+            _nativeMutation.Setup(m => m.RemoveRecentFile(succeeding.Path, TimeSpan.FromSeconds(10)));
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(failing.Path, TimeSpan.FromSeconds(10)))
+                .Throws(cleanupError);
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(succeeding.Path, TimeSpan.FromSeconds(10)))
+                .Returns(new List<string>());
+
+            var result = _manager.RemoveItems(
+                new[] { failing, succeeding },
+                new RemoveOptions { DeepCleanRecentLinks = true });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreSame(succeeding, result.Succeeded[0]);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.AreSame(failing, result.Failed[0].Item);
+            Assert.AreSame(cleanupError, result.Failed[0].Error);
+            _nativeMutation.Verify(m => m.RemoveRecentFile(succeeding.Path, TimeSpan.FromSeconds(10)), Times.Once);
+            _recentLinksCleaner.Verify(c => c.DeleteForTarget(succeeding.Path, TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
+        public void RemoveItems_DeepCleanDisabledDoesNotCallCleaner()
+        {
+            var item = QuickAccessItem.RecentFile(@"C:\test.txt");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { item.Path });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(item.Path, TimeSpan.FromSeconds(10)));
+
+            var result = _manager.RemoveItems(new[] { item });
+
+            Assert.AreEqual(1, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreEqual(0, result.Failed.Count);
+            _recentLinksCleaner.Verify(c => c.DeleteForTarget(It.IsAny<string>(), It.IsAny<TimeSpan>()), Times.Never);
+        }
+
+        [TestMethod]
+        public void RemoveItems_AllTargetRecordsFailureAndContinues()
+        {
+            var unsupported = new QuickAccessItem(@"C:\unsupported.txt", QuickAccess.All);
+            var valid = QuickAccessItem.RecentFile(@"C:\valid.txt");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { valid.Path });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(valid.Path, TimeSpan.FromSeconds(10)));
+
+            var result = _manager.RemoveItems(new[] { unsupported, valid });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreSame(valid, result.Succeeded[0]);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.AreSame(unsupported, result.Failed[0].Item);
+            Assert.IsInstanceOfType(result.Failed[0].Error, typeof(UnsupportedQuickAccessOperationException));
         }
 
         [TestMethod]
@@ -703,6 +842,24 @@ namespace TestWincent
             Assert.IsTrue(result.IsCompleteSuccess);
             Assert.IsFalse(result.HasPartialSuccess);
             Assert.AreEqual(1.0, result.SuccessRate);
+        }
+
+        [TestMethod]
+        public void BatchOperations_NullArgumentsThrow()
+        {
+            Assert.ThrowsException<ArgumentNullException>(() => _manager.AddItems(null));
+            Assert.ThrowsException<ArgumentNullException>(() => _manager.AddItems(Array.Empty<QuickAccessItem>(), null));
+            Assert.ThrowsException<ArgumentNullException>(() => _manager.RemoveItems(null));
+            Assert.ThrowsException<ArgumentNullException>(() => _manager.RemoveItems(Array.Empty<QuickAccessItem>(), null));
+        }
+
+        [TestMethod]
+        public void BatchOperations_NullItemThrowsArgumentException()
+        {
+            Assert.ThrowsException<ArgumentException>(
+                () => _manager.AddItems(new QuickAccessItem[] { null }));
+            Assert.ThrowsException<ArgumentException>(
+                () => _manager.RemoveItems(new QuickAccessItem[] { null }));
         }
 
         [TestMethod]
