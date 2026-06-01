@@ -199,35 +199,40 @@ namespace Wincent
 
             ThrowIfDisposed();
 
-            var currentShortcutPaths = QuickAccessShortcutSnapshot.EnumerateShortcutPaths(_fileSystem, RecentFolder);
-            var newShortcutPaths = currentShortcutPaths.Except(InitialShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList();
-            var deletedShortcutPaths = InitialShortcutPaths.Except(currentShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList();
-            var failures = new List<QuickAccessUnlockFailure>();
-
-            if (options.CleanupNewRecentLinks)
+            try
             {
-                foreach (var path in newShortcutPaths)
+                var currentShortcutPaths = QuickAccessShortcutSnapshot.EnumerateShortcutPaths(_fileSystem, RecentFolder);
+                var newShortcutPaths = currentShortcutPaths.Except(InitialShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList();
+                var deletedShortcutPaths = InitialShortcutPaths.Except(currentShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList();
+                var failures = new List<QuickAccessUnlockFailure>();
+
+                if (options.CleanupNewRecentLinks)
                 {
-                    try
+                    foreach (var path in newShortcutPaths)
                     {
-                        _fileSystem.DeleteFile(path);
-                    }
-                    catch (Exception ex)
-                    {
-                        failures.Add(new QuickAccessUnlockFailure(path, ex));
+                        try
+                        {
+                            _fileSystem.DeleteFile(path);
+                        }
+                        catch (Exception ex)
+                        {
+                            failures.Add(new QuickAccessUnlockFailure(path, ex));
+                        }
                     }
                 }
+
+                return new QuickAccessUnlockReport(
+                    RecentFolder,
+                    InitialShortcutPaths,
+                    currentShortcutPaths,
+                    deletedShortcutPaths,
+                    failures);
             }
-
-            DisposeHandles();
-            _disposed = true;
-
-            return new QuickAccessUnlockReport(
-                RecentFolder,
-                InitialShortcutPaths,
-                currentShortcutPaths,
-                deletedShortcutPaths,
-                failures);
+            finally
+            {
+                DisposeHandles();
+                _disposed = true;
+            }
         }
 
         /// <summary>

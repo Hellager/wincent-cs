@@ -158,6 +158,27 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void Unlock_WhenCurrentSnapshotEnumerationFails_DisposesHandles()
+        {
+            var handle = new StubHandle();
+            var fileSystem = new StubRecentLinkFileSystem(Array.Empty<string>())
+            {
+                ThrowOnEnumerate = true
+            };
+            var quickAccessLock = new QuickAccessLock(
+                QuickAccessLockTarget.RecentFiles,
+                @"C:\Recent",
+                Array.Empty<string>(),
+                new[] { handle },
+                fileSystem);
+
+            Assert.ThrowsException<IOException>(() => quickAccessLock.Unlock());
+
+            Assert.IsTrue(handle.IsDisposed, "Handles should be released even when snapshot enumeration fails.");
+            Assert.ThrowsException<ObjectDisposedException>(() => quickAccessLock.Unlock());
+        }
+
+        [TestMethod]
         public void Unlock_AfterUnlock_ThrowsObjectDisposedException()
         {
             var quickAccessLock = new QuickAccessLock(

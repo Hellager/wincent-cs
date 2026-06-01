@@ -374,7 +374,7 @@ namespace Wincent
         public IReadOnlyList<string> NewShortcutPaths { get; }
 
         /// <summary>
-        /// Gets the shortcuts deleted during cleanup.
+        /// Gets the shortcuts that were present in the initial snapshot but absent from the current snapshot.
         /// </summary>
         public IReadOnlyList<string> DeletedShortcutPaths { get; }
 
