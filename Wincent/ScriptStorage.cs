@@ -1,9 +1,11 @@
-﻿using System;
+using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace Wincent
 {
@@ -31,19 +33,12 @@ namespace Wincent
         /// </summary>
         public static readonly string DynamicScriptDir = Path.Combine(ScriptRoot, "dynamic");
 
-        // Script strategy factory
         private static readonly IPSScriptStrategyFactory _strategyFactory = new DefaultPSScriptStrategyFactory();
+        private static readonly object InitializationLock = new object();
+        private static readonly ConcurrentDictionary<string, object> ScriptCreationLocks =
+            new ConcurrentDictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
-        static ScriptStorage()
-        {
-            // Ensure all directories exist
-            Directory.CreateDirectory(ScriptRoot);
-            Directory.CreateDirectory(StaticScriptDir);
-            Directory.CreateDirectory(DynamicScriptDir);
-
-            CleanupStaticScriptsByVersion();
-            CleanupDynamicScripts();
-        }
+        private static int _initialized;
 
         /// <summary>
         /// Adds UTF-8 BOM to the beginning of a byte array if not already present
@@ -100,17 +95,16 @@ namespace Wincent
         /// <returns>Full path to script file</returns>
         public static string GetScriptPath(PSScript script)
         {
-            var fileName = $"{script}_{CurrentVersion}.ps1";
+            EnsureInitialized();
 
-            // Select directory based on script type
-            string directory = IsParameterizedScript(script) ? DynamicScriptDir : StaticScriptDir;
+            var fileName = $"{script}_{CurrentVersion}.ps1";
+            bool isParameterized = IsParameterizedScript(script);
+
+            string directory = isParameterized ? DynamicScriptDir : StaticScriptDir;
             string scriptPath = Path.Combine(directory, fileName);
 
-            // Create script if not exists and non-parameterized
-            if (!File.Exists(scriptPath) && !IsParameterizedScript(script))
-            {
-                CreateScriptFile(scriptPath, script, null);
-            }
+            if (!isParameterized)
+                EnsureScriptFile(scriptPath, script, null);
 
             return scriptPath;
         }
@@ -140,24 +134,81 @@ namespace Wincent
         /// <returns>Unique path for dynamic script</returns>
         public static string GetDynamicScriptPath(PSScript script, string parameter)
         {
+            EnsureInitialized();
+
             if (!IsParameterizedScript(script))
                 throw new ArgumentException($"Script {script} is not a parameterized script");
 
             if (string.IsNullOrEmpty(parameter))
                 throw new ArgumentException("Parameter cannot be null or empty for parameterized scripts");
 
-            // Create unique filename using parameter hash and version
             string paramHash = GetParameterHash(parameter);
             string fileName = $"{script}_{CurrentVersion}_{paramHash}.ps1";
             string scriptPath = Path.Combine(DynamicScriptDir, fileName);
 
-            // Create script if not exists
-            if (!File.Exists(scriptPath))
-            {
-                CreateScriptFile(scriptPath, script, parameter);
-            }
+            EnsureScriptFile(scriptPath, script, parameter);
 
             return scriptPath;
+        }
+
+        /// <summary>
+        /// Cleans up expired dynamic scripts and scripts with different versions
+        /// </summary>
+        /// <param name="maxAgeHours">Maximum retention time in hours</param>
+        public static void CleanupDynamicScripts(int maxAgeHours = 24)
+        {
+            EnsureInitialized(skipDynamicCleanup: true);
+            CleanupDynamicScriptsCore(maxAgeHours);
+        }
+
+        internal static void CleanupStaticScripts()
+        {
+            EnsureInitialized(skipStaticCleanup: true);
+            CleanupStaticScriptsByVersion();
+        }
+
+        private static void EnsureInitialized(bool skipStaticCleanup = false, bool skipDynamicCleanup = false)
+        {
+            if (Volatile.Read(ref _initialized) != 0)
+                return;
+
+            lock (InitializationLock)
+            {
+                if (_initialized != 0)
+                    return;
+
+                Directory.CreateDirectory(ScriptRoot);
+                Directory.CreateDirectory(StaticScriptDir);
+                Directory.CreateDirectory(DynamicScriptDir);
+
+                if (!skipStaticCleanup)
+                    CleanupStaticScriptsByVersion();
+                if (!skipDynamicCleanup)
+                    CleanupDynamicScriptsCore();
+
+                Volatile.Write(ref _initialized, 1);
+            }
+        }
+
+        private static void EnsureScriptFile(string scriptPath, PSScript script, string parameter)
+        {
+            if (File.Exists(scriptPath))
+                return;
+
+            object creationLock = ScriptCreationLocks.GetOrAdd(scriptPath, _ => new object());
+
+            try
+            {
+                lock (creationLock)
+                {
+                    if (!File.Exists(scriptPath))
+                        CreateScriptFile(scriptPath, script, parameter);
+                }
+            }
+            finally
+            {
+                ScriptCreationLocks.TryRemove(scriptPath, out _);
+            }
         }
 
         /// <summary>
@@ -170,17 +221,12 @@ namespace Wincent
         {
             try
             {
-                // Retrieve script strategy
                 var strategy = _strategyFactory.GetStrategy(script);
-
-                // Generate script content
                 string scriptContent = strategy.GenerateScript(parameter);
 
-                // Convert to UTF8 with BOM
                 byte[] scriptBytes = Encoding.UTF8.GetBytes(scriptContent);
                 byte[] contentWithBom = AddUtf8Bom(scriptBytes);
 
-                // Write to file
                 File.WriteAllBytes(scriptPath, contentWithBom);
             }
             catch (Exception ex)
@@ -189,16 +235,12 @@ namespace Wincent
             }
         }
 
-        /// <summary>
-        /// Cleans up expired dynamic scripts and scripts with different versions
-        /// </summary>
-        /// <param name="maxAgeHours">Maximum retention time in hours</param>
-        public static void CleanupDynamicScripts(int maxAgeHours = 24)
+        private static void CleanupDynamicScriptsCore(int maxAgeHours = 24)
         {
             try
             {
                 CleanupByAge(maxAgeHours);
-                CleanupByVersion();
+                CleanupDynamicScriptsByVersion();
             }
             catch
             {
@@ -239,44 +281,33 @@ namespace Wincent
         }
 
         /// <summary>
-        /// Cleans up scripts with versions that don't match current version
+        /// Cleans up dynamic scripts with versions that don't match current version
         /// </summary>
-        private static void CleanupByVersion()
+        private static void CleanupDynamicScriptsByVersion()
         {
             try
             {
                 var directory = new DirectoryInfo(DynamicScriptDir);
-                // Match version numbers in script filenames
                 var versionPattern = new Regex(@"^([A-Za-z]+)_v(\d+\.\d+\.\d+)_([0-9A-F]{8})\.ps1$");
                 foreach (var file in directory.GetFiles("*.ps1"))
                 {
                     var match = versionPattern.Match(file.Name);
-                    if (match.Success)
+                    if (!match.Success)
+                        continue;
+
+                    string fileVersion = match.Groups[2].Value;
+                    if (fileVersion == CurrentVersion.Substring(1))
+                        continue;
+
+                    try
                     {
-                        string scriptName = match.Groups[1].Value;
-                        string fileVersion = match.Groups[2].Value;
-                        string paramHash = match.Groups[3].Value;
-                        // Delete the file if version doesn't match current version
-                        if (fileVersion != CurrentVersion.Substring(1)) // Remove leading 'v' from version
-                        {
-                            try
-                            {
-                                file.Delete();
-                                // Recreate if valid PSScript enum and parameterized
-                                if (Enum.TryParse<PSScript>(scriptName, out var scriptType) &&
-                                    IsParameterizedScript(scriptType))
-                                {
-                                    // Note: Cannot recreate from hash, files will be recreated on demand
-                                }
-                            }
-                            catch
-                            {
-                                // Ignore deletion failures
-                            }
-                        }
+                        file.Delete();
+                    }
+                    catch
+                    {
+                        // Ignore deletion failures
                     }
                 }
-                CleanupStaticScriptsByVersion();
             }
             catch
             {
@@ -292,37 +323,31 @@ namespace Wincent
             try
             {
                 var directory = new DirectoryInfo(StaticScriptDir);
-                // Match version numbers in static script filenames
                 var versionPattern = new Regex(@"^([A-Za-z]+)_v(\d+\.\d+\.\d+)\.ps1$");
                 foreach (var file in directory.GetFiles("*.ps1"))
                 {
                     var match = versionPattern.Match(file.Name);
-                    if (match.Success)
+                    if (!match.Success)
+                        continue;
+
+                    string scriptName = match.Groups[1].Value;
+                    string fileVersion = match.Groups[2].Value;
+                    if (fileVersion == CurrentVersion.Substring(1))
+                        continue;
+
+                    try
                     {
-                        string scriptName = match.Groups[1].Value;
-                        string fileVersion = match.Groups[2].Value;
-                        // Delete the file if version doesn't match current version
-                        if (fileVersion != CurrentVersion.Substring(1)) // Remove leading 'v' from version
+                        file.Delete();
+                        if (Enum.TryParse<PSScript>(scriptName, out var scriptType) &&
+                            !IsParameterizedScript(scriptType))
                         {
-                            try
-                            {
-                                file.Delete();
-                                // Recreate if valid PSScript enum and static
-                                if (Enum.TryParse<PSScript>(scriptName, out var scriptType) &&
-                                    !IsParameterizedScript(scriptType))
-                                {
-                                    var newFilePath = Path.Combine(StaticScriptDir, $"{scriptType}_{CurrentVersion}.ps1");
-                                    if (!File.Exists(newFilePath))
-                                    {
-                                        CreateScriptFile(newFilePath, scriptType, null);
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                                // Ignore deletion failures
-                            }
+                            var newFilePath = Path.Combine(StaticScriptDir, $"{scriptType}_{CurrentVersion}.ps1");
+                            EnsureScriptFile(newFilePath, scriptType, null);
                         }
+                    }
+                    catch
+                    {
+                        // Ignore deletion failures
                     }
                 }
             }
@@ -337,13 +362,11 @@ namespace Wincent
         /// </summary>
         private static string GetParameterHash(string parameter)
         {
-            // Use simple hash to avoid long filenames
-            using (var md5 = System.Security.Cryptography.MD5.Create())
+            using (var sha256 = System.Security.Cryptography.SHA256.Create())
             {
                 byte[] inputBytes = Encoding.UTF8.GetBytes(parameter);
-                byte[] hashBytes = md5.ComputeHash(inputBytes);
+                byte[] hashBytes = sha256.ComputeHash(inputBytes);
 
-                // Convert to short hex string
                 return BitConverter.ToString(hashBytes)
                     .Replace("-", "")
                     .Substring(0, 8);

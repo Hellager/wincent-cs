@@ -522,14 +522,34 @@ namespace Wincent
         /// <returns>Script execution result</returns>
         public async Task<ScriptResult> ExecutePSScript(PSScript method, string para)
         {
+            return await ExecutePSScriptCore(method, para, 0);
+        }
+
+        /// <summary>
+        /// Executes PowerShell script with custom timeout
+        /// </summary>
+        /// <param name="method">Script type</param>
+        /// <param name="para">Script parameter (required for parameterized scripts)</param>
+        /// <param name="timeoutSeconds">Timeout in seconds (0 for no timeout)</param>
+        /// <returns>Script execution result</returns>
+        public async Task<ScriptResult> ExecutePSScriptWithTimeout(PSScript method, string para, int timeoutSeconds)
+        {
+            return await ExecutePSScriptCore(method, para, timeoutSeconds);
+        }
+
+        private async Task<ScriptResult> ExecutePSScriptCore(PSScript method, string para, int timeoutSeconds)
+        {
             string scriptPath = null;
             try
             {
                 scriptPath = PrepareScriptPath(method, para);
 
-                // Execute without timeout
-                var result = await ExecuteCoreAsync(scriptPath, null, para);
-                EnsureSuccess(method, para, result, scriptPath, 0);
+                TimeSpan? timeout = timeoutSeconds > 0
+                    ? (TimeSpan?)TimeSpan.FromSeconds(timeoutSeconds)
+                    : null;
+
+                var result = await ExecuteCoreAsync(scriptPath, timeout, para);
+                EnsureSuccess(method, para, result, scriptPath, timeoutSeconds);
                 return result;
             }
             catch (InvalidPathException)
@@ -542,74 +562,7 @@ namespace Wincent
                 // Re-throw for caller handling
                 throw;
             }
-            catch (ScriptTimeoutException)
-            {
-                // Re-throw for caller handling
-                throw;
-            }
-            catch (ScriptExecutionException ex)
-            {
-                throw CreatePowerShellException(
-                    method,
-                    para,
-                    null,
-                    ex.Output,
-                    ex.Error,
-                    scriptPath,
-                    para,
-                    null,
-                    ex);
-            }
-            catch (Exception ex)
-            {
-                throw CreatePowerShellException(
-                    method,
-                    para,
-                    null,
-                    string.Empty,
-                    ex.Message,
-                    scriptPath,
-                    para,
-                    null,
-                    ex);
-            }
-            finally
-            {
-                // Cleanup dynamic scripts
-                if (_scriptStorageService.IsParameterizedScript(method) && para != null)
-                {
-                    _scriptStorageService.CleanupDynamicScripts();
-                }
-            }
-        }
-
-        /// <summary>
-        /// Executes PowerShell script with custom timeout
-        /// </summary>
-        /// <param name="method">Script type</param>
-        /// <param name="para">Script parameter (required for parameterized scripts)</param>
-        /// <param name="timeoutSeconds">Timeout in seconds (0 for no timeout)</param>
-        /// <returns>Script execution result</returns>
-        public async Task<ScriptResult> ExecutePSScriptWithTimeout(PSScript method, string para, int timeoutSeconds)
-        {
-            string scriptPath = null;
-            try
-            {
-                scriptPath = PrepareScriptPath(method, para);
-
-                // Set timeout duration
-                TimeSpan? timeout = null;
-                if (timeoutSeconds > 0)
-                {
-                    timeout = TimeSpan.FromSeconds(timeoutSeconds);
-                }
-
-                // Execute with timeout
-                var result = await ExecuteCoreAsync(scriptPath, timeout, para);
-                EnsureSuccess(method, para, result, scriptPath, timeoutSeconds);
-                return result;
-            }
-            catch (InvalidPathException)
+            catch (ScriptTimeoutException) when (timeoutSeconds <= 0)
             {
                 // Re-throw for caller handling
                 throw;
@@ -640,11 +593,6 @@ namespace Wincent
                     para,
                     timeoutSeconds > 0 ? (TimeSpan?)TimeSpan.FromSeconds(timeoutSeconds) : null,
                     ex);
-            }
-            catch (PowerShellExecutionException)
-            {
-                // Re-throw for caller handling
-                throw;
             }
             catch (Exception ex)
             {

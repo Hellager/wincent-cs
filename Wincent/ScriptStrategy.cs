@@ -1,5 +1,4 @@
-﻿using System;
-using System.IO;
+using System;
 using System.Collections.Generic;
 
 namespace Wincent
@@ -15,8 +14,6 @@ namespace Wincent
         PinToFrequentFolder,
         UnpinFromFrequentFolder,
         EmptyPinnedFolders,
-        CheckQueryFeasible,
-        CheckPinUnpinFeasible,
     }
 
     internal static class PSScriptExtensions
@@ -44,7 +41,7 @@ namespace Wincent
                 case PSScript.EmptyPinnedFolders:
                     return PowerShellOperation.ClearPinnedFolders;
                 default:
-                    return PowerShellOperation.QueryQuickAccess;
+                    throw new NotSupportedException($"Unsupported script type: {script}");
             }
         }
     }
@@ -70,59 +67,6 @@ namespace Wincent
                 return input;
 
             return input.Replace("'", "''");
-        }
-
-        protected static string CreateTimeoutWrapper(string scriptBlock, int timeoutSeconds = 5)
-        {
-            return $@"
-            $timeout = {timeoutSeconds}
-
-            $scriptBlock = {{
-                {scriptBlock}
-            }}.ToString()
-
-            $arguments = ""-Command & {{$scriptBlock}}""
-            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
-
-            if (-not $process.WaitForExit($timeout * 1000)) {{
-                try {{
-                    $process.Kill()
-                    Write-Error ""Process execution timed out (${{timeout}}s), forcefully terminated""
-                    exit 1
-                }}
-                catch {{
-                    Write-Error ""Error occurred while terminating process: $_""
-                    exit 1
-                }}
-            }}
-            ";
-        }
-
-        protected static string CreateTimeoutWrapperWithParam(string scriptBlock, string paramName, string paramValue, int timeoutSeconds = 5)
-        {
-            return $@"
-            $timeout = {timeoutSeconds}
-
-            $scriptBlock = {{
-                param(${paramName})
-                {scriptBlock}
-            }}.ToString()
-
-            $arguments = ""-Command & {{$scriptBlock}} -{paramName} '{EscapePowerShellString(paramValue)}'""
-            $process = Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
-
-            if (-not $process.WaitForExit($timeout * 1000)) {{
-                try {{
-                    $process.Kill()
-                    Write-Error ""Process execution timed out (${{timeout}}s), forcefully terminated""
-                    exit 1
-                }}
-                catch {{
-                    Write-Error ""Error occurred while terminating process: $_""
-                    exit 1
-                }}
-            }}
-            ";
         }
 
         public abstract string GenerateScript(string parameter);
@@ -175,42 +119,6 @@ namespace Wincent
         ";
     }
 
-    internal class CheckQueryFeasibleStrategy : PSScriptStrategyBase
-    {
-        public override string GenerateScript(string parameter) => $@"
-            {EncodingSetup}
-            {CreateTimeoutWrapper($@"
-                {ShellApplicationSetup}
-                $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
-                    ForEach-Object {{ $_.Path }}
-            ")}
-        ";
-    }
-
-    internal class CheckPinUnpinFeasibleStrategy : PSScriptStrategyBase
-    {
-        public override string GenerateScript(string parameter) => $@"
-            {EncodingSetup}
-            $currentPath = $PSScriptRoot
-            {CreateTimeoutWrapperWithParam($@"
-                {ShellApplicationSetup}
-                $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')
-
-                $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match 'Windows 11'
-                if ($isWin11) 
-                {{
-                    $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')
-                }}
-                else
-                {{
-                    $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                    $target = $folders | Where-Object {{$_.Path -eq $scriptPath}};
-                    $target.InvokeVerb('unpinfromhome');
-                }}
-            ", "scriptPath", "$currentPath", 10)}
-        ";
-    }
-
     internal class AddRecentFileStrategy : PSScriptStrategyBase
     {
         public override string GenerateScript(string parameter)
@@ -220,6 +128,8 @@ namespace Wincent
 
             parameter = EscapePowerShellString(parameter);
 
+            // Recent-file additions use the native SHAddToRecentDocs path in QuickAccessManager.
+            // This legacy script shape is retained for existing script-generation tests.
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
@@ -277,7 +187,7 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
-                $shellApplication.Namespace($scriptPath).Self.InvokeVerb('pintohome')                
+                $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome')                
 
                 $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match 'Windows 11'
                 if ($isWin11)
@@ -292,7 +202,7 @@ namespace Wincent
                 }}
             ";
         }
-    }   
+    }
 
     internal class EmptyPinnedFoldersStrategy : PSScriptStrategyBase
     {
@@ -309,7 +219,6 @@ namespace Wincent
         IPSScriptStrategy GetStrategy(PSScript method);
     }
 
-
     internal class DefaultPSScriptStrategyFactory : IPSScriptStrategyFactory
     {
         private static readonly IReadOnlyDictionary<PSScript, Func<IPSScriptStrategy>> _strategyMap =
@@ -319,8 +228,6 @@ namespace Wincent
                 [PSScript.QueryRecentFile] = () => new QueryRecentFileStrategy(),
                 [PSScript.QueryFrequentFolder] = () => new QueryFrequentFolderStrategy(),
                 [PSScript.QueryQuickAccess] = () => new QueryQuickAccessStrategy(),
-                [PSScript.CheckQueryFeasible] = () => new CheckQueryFeasibleStrategy(),
-                [PSScript.CheckPinUnpinFeasible] = () => new CheckPinUnpinFeasibleStrategy(),
                 [PSScript.AddRecentFile] = () => new AddRecentFileStrategy(),
                 [PSScript.RemoveRecentFile] = () => new RemoveRecentFileStrategy(),
                 [PSScript.PinToFrequentFolder] = () => new PinToFrequentFolderStrategy(),
