@@ -433,7 +433,7 @@ namespace Wincent
             var script = MapQueryScript(target);
             try
             {
-                return _nativeQuery.GetItems(target);
+                return _nativeQuery.GetItems(target, _timeout);
             }
             catch (Exception)
             {

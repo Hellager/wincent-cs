@@ -6,7 +6,7 @@ namespace Wincent
 {
     internal interface IQuickAccessNativeQuery
     {
-        IReadOnlyList<string> GetItems(QuickAccess target);
+        IReadOnlyList<string> GetItems(QuickAccess target, TimeSpan timeout);
     }
 
     internal interface IShellApplicationFactory
@@ -42,42 +42,66 @@ namespace Wincent
             _shellApplicationFactory = shellApplicationFactory ?? throw new ArgumentNullException(nameof(shellApplicationFactory));
         }
 
-        public IReadOnlyList<string> GetItems(QuickAccess target)
+        public IReadOnlyList<string> GetItems(QuickAccess target, TimeSpan timeout)
         {
             var query = QuickAccessNativeQueryMapping.ForTarget(target);
+            return StaThreadRunner.Run(() => EnumerateItemsOnSta(query), timeout, _nativeMethods);
+        }
 
-            using (ComGuard.InitializeSta(_nativeMethods))
+        private IReadOnlyList<string> EnumerateItemsOnSta(QuickAccessNativeQuerySpec query)
+        {
+            object shellApplication = null;
+            object folder = null;
+            object items = null;
+            try
             {
-                dynamic shellApplication = _shellApplicationFactory.CreateShellApplication();
-                dynamic folder = shellApplication.Namespace(query.Namespace);
+                shellApplication = _shellApplicationFactory.CreateShellApplication();
+                dynamic shellApp = shellApplication;
+                folder = shellApp.Namespace(query.Namespace);
                 if (folder == null)
                     throw new InvalidOperationException($"Failed to open shell namespace: {query.Namespace}");
 
-                dynamic items = folder.Items();
+                dynamic folderObj = folder;
+                items = folderObj.Items();
                 if (items == null)
                     throw new InvalidOperationException($"Failed to enumerate shell namespace: {query.Namespace}");
 
-                int count = Convert.ToInt32(items.Count);
+                dynamic itemsObj = items;
+                int count = Convert.ToInt32(itemsObj.Count);
                 var paths = new List<string>(Math.Max(0, count));
 
                 for (int index = 0; index < count; index++)
                 {
-                    TryAddItemPath(items, index, query.Filter, paths);
+                    TryAddItemPath(itemsObj, index, query.Filter, paths);
                 }
 
                 return paths.AsReadOnly();
+            }
+            finally
+            {
+                if (items != null && Marshal.IsComObject(items))
+                    Marshal.FinalReleaseComObject(items);
+                if (folder != null && Marshal.IsComObject(folder))
+                    Marshal.FinalReleaseComObject(folder);
+                if (shellApplication != null && Marshal.IsComObject(shellApplication))
+                    Marshal.FinalReleaseComObject(shellApplication);
             }
         }
 
         private static void TryAddItemPath(dynamic items, int index, QuickAccessNativeQueryFilter filter, ICollection<string> paths)
         {
+            object item = null;
             try
             {
-                dynamic item = items.Item(index);
-                if (item == null || !QuickAccessNativeQueryMapping.ShouldKeep(item, filter))
+                item = items.Item(index);
+                if (item == null)
                     return;
 
-                string path = item.Path as string;
+                dynamic dItem = item;
+                if (!QuickAccessNativeQueryMapping.ShouldKeep(dItem, filter))
+                    return;
+
+                string path = dItem.Path as string;
                 if (!string.IsNullOrWhiteSpace(path))
                     paths.Add(path);
             }
@@ -88,6 +112,11 @@ namespace Wincent
             catch (Exception)
             {
                 // Item-level failures are skipped to match the Rust native query behavior.
+            }
+            finally
+            {
+                if (item != null && Marshal.IsComObject(item))
+                    Marshal.FinalReleaseComObject(item);
             }
         }
     }
@@ -147,7 +176,7 @@ namespace Wincent
 
     internal sealed class PowerShellFallbackNativeQuery : IQuickAccessNativeQuery
     {
-        public IReadOnlyList<string> GetItems(QuickAccess target)
+        public IReadOnlyList<string> GetItems(QuickAccess target, TimeSpan timeout)
         {
             throw new InvalidOperationException("Native Quick Access query is disabled for this instance.");
         }

@@ -105,7 +105,7 @@ namespace TestWincent
         public void GetItems_NativeSuccess_DoesNotUsePowerShellFallback()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
-            nativeQuery.Setup(n => n.GetItems(QuickAccess.RecentFiles))
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.RecentFiles, TimeSpan.FromSeconds(10)))
                 .Returns(new List<string> { @"C:\native.txt" });
             _manager.Dispose();
             _manager = CreateManager(nativeQuery.Object);
@@ -114,13 +114,14 @@ namespace TestWincent
 
             CollectionAssert.AreEqual(new[] { @"C:\native.txt" }, result.ToList());
             _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, It.IsAny<int>()), Times.Never);
+            nativeQuery.Verify(n => n.GetItems(QuickAccess.RecentFiles, TimeSpan.FromSeconds(10)), Times.Once);
         }
 
         [TestMethod]
         public void GetItems_NativeFailure_FallsBackToPowerShell()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
-            nativeQuery.Setup(n => n.GetItems(QuickAccess.FrequentFolders))
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.FrequentFolders, It.IsAny<TimeSpan>()))
                 .Throws(new InvalidOperationException("native failed"));
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\fallback" });
@@ -137,7 +138,7 @@ namespace TestWincent
         public void GetItems_NativeAndPowerShellFailure_ThrowsPowerShellExecutionException()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
-            nativeQuery.Setup(n => n.GetItems(QuickAccess.All))
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.All, It.IsAny<TimeSpan>()))
                 .Throws(new InvalidOperationException("native failed"));
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10))
                 .Throws(CreatePowerShellException(PowerShellOperation.QueryQuickAccess, PowerShellErrorKind.ProcessFailed, "fallback failed"));
@@ -172,7 +173,7 @@ namespace TestWincent
         public void ContainsItem_NativeResult_UsesCaseSensitiveSubstring()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
-            nativeQuery.Setup(n => n.GetItems(QuickAccess.RecentFiles))
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.RecentFiles, It.IsAny<TimeSpan>()))
                 .Returns(new List<string> { @"C:\NativeCaseSensitive.txt" });
             _manager.Dispose();
             _manager = CreateManager(nativeQuery.Object);
@@ -194,7 +195,7 @@ namespace TestWincent
         public void ContainsItemExact_NativeResult_UsesWindowsPathSemantics()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
-            nativeQuery.Setup(n => n.GetItems(QuickAccess.FrequentFolders))
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.FrequentFolders, It.IsAny<TimeSpan>()))
                 .Returns(new List<string> { @"C:\Folder\" });
             _manager.Dispose();
             _manager = CreateManager(nativeQuery.Object);

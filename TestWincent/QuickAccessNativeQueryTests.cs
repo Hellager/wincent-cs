@@ -70,7 +70,7 @@ namespace TestWincent
                 nativeMethods.Object,
                 new FakeShellApplicationFactory(shellApplication));
 
-            var result = query.GetItems(QuickAccess.FrequentFolders);
+            var result = query.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(1));
 
             CollectionAssert.AreEqual(new[] { @"C:\Folder" }, result.ToList());
             nativeMethods.Verify(n => n.CoUninitialize(), Moq.Times.Once);
@@ -84,9 +84,18 @@ namespace TestWincent
             var nativeQuery = new ShellQuickAccessNativeQuery(new DefaultNativeMethods());
             var executor = new ScriptExecutor();
 
-            AssertCompatibleShape(nativeQuery.GetItems(QuickAccess.All), ExecutePowerShellQuery(executor, PSScript.QueryQuickAccess));
-            AssertCompatibleShape(nativeQuery.GetItems(QuickAccess.RecentFiles), ExecutePowerShellQuery(executor, PSScript.QueryRecentFile));
-            AssertCompatibleShape(nativeQuery.GetItems(QuickAccess.FrequentFolders), ExecutePowerShellQuery(executor, PSScript.QueryFrequentFolder));
+            Console.WriteLine("========== QuickAccess.All ==========");
+            AssertCompatibleShape("All",
+                nativeQuery.GetItems(QuickAccess.All, TimeSpan.FromSeconds(10)),
+                ExecutePowerShellQuery(executor, PSScript.QueryQuickAccess));
+            Console.WriteLine("========== QuickAccess.RecentFiles ==========");
+            AssertCompatibleShape("RecentFiles",
+                nativeQuery.GetItems(QuickAccess.RecentFiles, TimeSpan.FromSeconds(10)),
+                ExecutePowerShellQuery(executor, PSScript.QueryRecentFile));
+            Console.WriteLine("========== QuickAccess.FrequentFolders ==========");
+            AssertCompatibleShape("FrequentFolders",
+                nativeQuery.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)),
+                ExecutePowerShellQuery(executor, PSScript.QueryFrequentFolder));
         }
 
         private static IReadOnlyList<string> ExecutePowerShellQuery(ScriptExecutor executor, PSScript script)
@@ -94,8 +103,16 @@ namespace TestWincent
             return executor.ExecutePSScriptWithCache(script, null, 10).GetAwaiter().GetResult();
         }
 
-        private static void AssertCompatibleShape(IReadOnlyList<string> nativeResult, IReadOnlyList<string> powerShellResult)
+        private static void AssertCompatibleShape(string label, IReadOnlyList<string> nativeResult, IReadOnlyList<string> powerShellResult)
         {
+            Console.WriteLine($"--- Native query ({label}) [{nativeResult.Count} items] ---");
+            foreach (var path in nativeResult)
+                Console.WriteLine($"  {path}");
+
+            Console.WriteLine($"--- PowerShell query ({label}) [{powerShellResult.Count} items] ---");
+            foreach (var path in powerShellResult)
+                Console.WriteLine($"  {path}");
+
             Assert.IsNotNull(nativeResult);
             Assert.IsNotNull(powerShellResult);
             CollectionAssert.AllItemsAreNotNull(nativeResult.ToList());
