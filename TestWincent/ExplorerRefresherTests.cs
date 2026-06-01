@@ -2,6 +2,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Wincent;
 
 namespace TestWincent
@@ -104,6 +105,19 @@ namespace TestWincent
 
             Assert.AreEqual(0, browser.RefreshCalls);
             Assert.AreEqual(1, documents.RefreshCalls);
+        }
+
+        [TestMethod]
+        [TestCategory("Integration")]
+        [Ignore("Performs a real Explorer refresh via COM Shell.Application; enable manually to verify current system behavior.")]
+        public void Integration_RefreshRealExplorerWindows()
+        {
+            var refresher = new ShellExplorerRefresher(new DefaultNativeMethods());
+            var stopwatch = Stopwatch.StartNew();
+
+            refresher.Refresh(TimeSpan.FromSeconds(10));
+
+            Console.WriteLine($"Refresh completed in {stopwatch.Elapsed.TotalSeconds:0.###} seconds.");
         }
 
         private static ShellExplorerRefresher CreateRefresher(params FakeWindow[] windows)

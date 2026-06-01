@@ -36,34 +36,48 @@ namespace Wincent
 
         private void RefreshOnStaThread()
         {
-            dynamic shellApplication = _shellApplicationFactory.CreateShellApplication();
-            dynamic windows = shellApplication.Windows();
-            if (windows == null)
-                return;
-
-            int count = Convert.ToInt32(windows.Count);
-
-            var recentResult = RefreshMatchingWindows((object)windows, count, IsRecentAccessLocation);
-            if (recentResult.Matched > 0)
+            object shellApplication = null;
+            object windows = null;
+            try
             {
-                if (recentResult.Refreshed > 0)
+                shellApplication = _shellApplicationFactory.CreateShellApplication();
+                dynamic shellApp = shellApplication;
+                windows = shellApp.Windows();
+                if (windows == null)
                     return;
 
-                throw new QuickAccessOperationException(
-                    "RefreshExplorer",
-                    QuickAccess.All,
-                    null,
-                    new InvalidOperationException($"Found {recentResult.Matched} Quick Access or Home Explorer windows but refreshed none."));
-            }
+                dynamic windowsObj = windows;
+                int count = Convert.ToInt32(windowsObj.Count);
 
-            var explorerResult = RefreshMatchingWindows((object)windows, count, IsProbableExplorerLocation);
-            if (explorerResult.Matched > 0 && explorerResult.Refreshed == 0)
+                var recentResult = RefreshMatchingWindows(windows, count, IsRecentAccessLocation);
+                if (recentResult.Matched > 0)
+                {
+                    if (recentResult.Refreshed > 0)
+                        return;
+
+                    throw new QuickAccessOperationException(
+                        "RefreshExplorer",
+                        QuickAccess.All,
+                        null,
+                        new InvalidOperationException($"Found {recentResult.Matched} Quick Access or Home Explorer windows but refreshed none."));
+                }
+
+                var explorerResult = RefreshMatchingWindows(windows, count, IsProbableExplorerLocation);
+                if (explorerResult.Matched > 0 && explorerResult.Refreshed == 0)
+                {
+                    throw new QuickAccessOperationException(
+                        "RefreshExplorer",
+                        QuickAccess.All,
+                        null,
+                        new InvalidOperationException($"Found {explorerResult.Matched} Explorer windows but refreshed none."));
+                }
+            }
+            finally
             {
-                throw new QuickAccessOperationException(
-                    "RefreshExplorer",
-                    QuickAccess.All,
-                    null,
-                    new InvalidOperationException($"Found {explorerResult.Matched} Explorer windows but refreshed none."));
+                if (windows != null && Marshal.IsComObject(windows))
+                    Marshal.FinalReleaseComObject(windows);
+                if (shellApplication != null && Marshal.IsComObject(shellApplication))
+                    Marshal.FinalReleaseComObject(shellApplication);
             }
         }
 
@@ -76,10 +90,24 @@ namespace Wincent
 
             for (int index = 0; index < count; index++)
             {
-                dynamic window;
+                object window = null;
                 try
                 {
                     window = ((dynamic)windows).Item(index);
+                    if (window == null)
+                        continue;
+
+                    dynamic w = window;
+                    var location = new ExplorerLocation(
+                        ReadStringProperty(() => w.LocationName),
+                        ReadStringProperty(() => w.LocationURL));
+
+                    if (!predicate(location))
+                        continue;
+
+                    result.Matched++;
+                    if (TryRefreshWindow(w))
+                        result.Refreshed++;
                 }
                 catch (COMException)
                 {
@@ -89,20 +117,11 @@ namespace Wincent
                 {
                     continue;
                 }
-
-                if (window == null)
-                    continue;
-
-                var location = new ExplorerLocation(
-                    ReadStringProperty(() => window.LocationName),
-                    ReadStringProperty(() => window.LocationURL));
-
-                if (!predicate(location))
-                    continue;
-
-                result.Matched++;
-                if (TryRefreshWindow(window))
-                    result.Refreshed++;
+                finally
+                {
+                    if (window != null && Marshal.IsComObject(window))
+                        Marshal.FinalReleaseComObject(window);
+                }
             }
 
             return result;
@@ -119,15 +138,22 @@ namespace Wincent
             {
             }
 
+            object document = null;
             try
             {
-                dynamic document = window.Document;
-                document.Refresh();
+                document = window.Document;
+                dynamic doc = document;
+                doc.Refresh();
                 return true;
             }
             catch (Exception)
             {
                 return false;
+            }
+            finally
+            {
+                if (document != null && Marshal.IsComObject(document))
+                    Marshal.FinalReleaseComObject(document);
             }
         }
 
