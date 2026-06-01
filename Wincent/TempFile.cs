@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace Wincent
 {
@@ -13,6 +14,10 @@ namespace Wincent
     /// </summary>
     internal sealed class TempFile : IDisposable
     {
+        public const string DefaultDirectoryName = "WincentTemp";
+
+        private static readonly Encoding DefaultTextEncoding = new UTF8Encoding(false);
+
         /// <summary>
         /// Gets the full path of the temporary file
         /// </summary>
@@ -23,27 +28,24 @@ namespace Wincent
         /// </summary>
         public string FileName => Path.GetFileName(FullPath);
 
-        /// <summary>
-        /// Gets the directory name where temporary files are created
-        /// </summary>
-        public static string DirName { get; set; } = "WincentTemp";
-
-        private bool _disposed;
+        private int _disposed;
 
         /// <summary>
         /// Creates a temporary file and writes binary content
         /// </summary>
         /// <param name="content">Binary file content</param>
         /// <param name="extension">File extension (with or without leading dot)</param>
-        /// <param name="encoding">Text encoding reserved for compatibility with existing callers.</param>
-        public static TempFile Create(byte[] content, string extension = ".ps1", Encoding encoding = null)
+        /// <param name="directoryName">Temp subdirectory name.</param>
+        public static TempFile Create(
+            byte[] content,
+            string extension = ".ps1",
+            string directoryName = DefaultDirectoryName)
         {
-            if (encoding == null) encoding = Encoding.UTF8;
             _ = content ?? throw new ArgumentNullException(nameof(content));
 
             ValidateExtension(ref extension);
 
-            string fullPath = GenerateFilePath(extension);
+            string fullPath = GenerateFilePath(extension, directoryName);
 
             try
             {
@@ -58,21 +60,27 @@ namespace Wincent
         }
 
         /// <summary>
-        /// Creates a temporary file and writes text content
+        /// Creates a temporary file and writes text content with the specified encoding
         /// </summary>
         /// <param name="content">File content</param>
         /// <param name="extension">File extension (with or without leading dot)</param>
-        public static TempFile Create(string content, string extension = ".tmp")
+        /// <param name="encoding">Text encoding used to write the file. Uses UTF-8 without BOM when null.</param>
+        /// <param name="directoryName">Temp subdirectory name.</param>
+        public static TempFile Create(
+            string content,
+            string extension = ".tmp",
+            Encoding encoding = null,
+            string directoryName = DefaultDirectoryName)
         {
             _ = content ?? throw new ArgumentNullException(nameof(content));
 
             ValidateExtension(ref extension);
 
-            string fullPath = GenerateFilePath(extension);
+            string fullPath = GenerateFilePath(extension, directoryName);
 
             try
             {
-                File.WriteAllText(fullPath, content);
+                File.WriteAllText(fullPath, content, encoding ?? DefaultTextEncoding);
                 return new TempFile(fullPath);
             }
             catch
@@ -92,24 +100,29 @@ namespace Wincent
                 extension = "." + extension;
         }
 
-        private static string GenerateFilePath(string extension)
+        private static string GenerateFilePath(string extension, string directoryName)
         {
             string baseTempDir = Path.GetTempPath();
-            string tempDir = Path.Combine(baseTempDir, DirName);
+            string tempDir = baseTempDir;
+            string normalizedDirectoryName = string.IsNullOrWhiteSpace(directoryName)
+                ? DefaultDirectoryName
+                : directoryName;
 
-            // Create the custom temp directory if it doesn't exist
-            if (!Directory.Exists(tempDir))
+            try
             {
-                try
+                string customTempDir = Path.Combine(baseTempDir, normalizedDirectoryName);
+
+                // Create the custom temp directory if it doesn't exist
+                if (!Directory.Exists(customTempDir))
                 {
-                    Directory.CreateDirectory(tempDir);
+                    Directory.CreateDirectory(customTempDir);
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Failed to create temp directory: {ex.Message}");
-                    // Fall back to system temp directory if custom directory creation fails
-                    tempDir = baseTempDir;
-                }
+
+                tempDir = customTempDir;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to create temp directory: {ex.Message}");
             }
 
             string fileName = $"{Guid.NewGuid():N}{extension}";
@@ -127,26 +140,33 @@ namespace Wincent
         /// </summary>
         public FileStream OpenRead()
         {
-            return _disposed ? throw new ObjectDisposedException(nameof(TempFile)) : File.OpenRead(FullPath);
+            ThrowIfDisposed();
+            return File.OpenRead(FullPath);
         }
 
         /// <summary>
         /// Reads all text content from the file
         /// </summary>
-        public string ReadAllText() => ReadAllText(Encoding.UTF8);
+        public string ReadAllText() => ReadAllText(DefaultTextEncoding);
 
         public string ReadAllText(Encoding encoding)
         {
-            return _disposed ? throw new ObjectDisposedException(nameof(TempFile)) : File.ReadAllText(FullPath, encoding);
+            ThrowIfDisposed();
+            return File.ReadAllText(FullPath, encoding);
         }
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
 
             SafeDelete(FullPath);
-            _disposed = true;
-            GC.SuppressFinalize(this);
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+                throw new ObjectDisposedException(nameof(TempFile));
         }
 
         private static void SafeDelete(string path)
@@ -161,7 +181,5 @@ namespace Wincent
                 Debug.WriteLine($"TempFile deletion failed: {path}\nError: {ex.Message}");
             }
         }
-
-        ~TempFile() => Dispose();
     }
 }
