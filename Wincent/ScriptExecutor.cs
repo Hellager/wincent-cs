@@ -480,8 +480,25 @@ namespace Wincent
             // Create cache key for query
             var key = new CacheKey(method, para);
 
-            // Get data file modified time for cache validation
-            DateTime currentModifiedTime = _dataFiles.GetModifiedTimeForScript(method);
+            // Get data file modified time for cache validation.
+            // When the backing file is missing (fresh machine, cleared data), bypass the cache
+            // and execute the query directly without caching.
+            DateTime currentModifiedTime;
+            try
+            {
+                currentModifiedTime = _dataFiles.GetModifiedTimeForScript(method);
+            }
+            catch (FileNotFoundException)
+            {
+                ScriptResult bypassResult;
+                if (timeoutSeconds > 0)
+                    bypassResult = await ExecutePSScriptWithTimeout(method, para, timeoutSeconds);
+                else
+                    bypassResult = await ExecutePSScript(method, para);
+
+                EnsureSuccess(method, para, bypassResult, null, timeoutSeconds);
+                return ParseScriptOutputToList(bypassResult.Output);
+            }
 
             // Check cache
             if (_cache.TryGetValue(key, out CacheEntry entry))

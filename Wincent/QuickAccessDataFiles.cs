@@ -220,33 +220,23 @@ namespace Wincent
         }
 
         /// <summary>
-        /// Gets modification time for specific script type
+        /// Gets modification time for specific script type.
         /// </summary>
         /// <param name="scriptType">Script type</param>
-        /// <returns>Related data file modification time</returns>
-        /// <exception cref="FileNotFoundException">Thrown when target data file is missing</exception>
+        /// <returns>Related data file modification time, or <see cref="DateTime.Now"/> for non-query scripts.</returns>
+        /// <exception cref="FileNotFoundException">Thrown when the target data file is missing for a query script.</exception>
         public DateTime GetModifiedTimeForScript(PSScript scriptType)
         {
-            try
+            switch (scriptType)
             {
-                switch (scriptType)
-                {
-                    case PSScript.QueryRecentFile:
-                        return GetRecentFilesModifiedTime();
-                    case PSScript.QueryFrequentFolder:
-                        return GetFrequentFoldersModifiedTime();
-                    case PSScript.QueryQuickAccess:
-                        return GetQuickAccessModifiedTime();
-                    default:
-                        return DateTime.Now; // Use current time for non-query scripts
-                }
-            }
-            catch (FileNotFoundException) when (scriptType != PSScript.QueryRecentFile &&
-                                               scriptType != PSScript.QueryFrequentFolder &&
-                                               scriptType != PSScript.QueryQuickAccess)
-            {
-                // Return current time for non-specific query scripts
-                return DateTime.Now;
+                case PSScript.QueryRecentFile:
+                    return GetRecentFilesModifiedTime();
+                case PSScript.QueryFrequentFolder:
+                    return GetFrequentFoldersModifiedTime();
+                case PSScript.QueryQuickAccess:
+                    return GetQuickAccessModifiedTime();
+                default:
+                    return DateTime.Now;
             }
         }
 

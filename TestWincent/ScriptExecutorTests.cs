@@ -244,6 +244,63 @@ namespace TestWincent
             CollectionAssert.AreEqual(result1, result2);
         }
 
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_MissingBackingFile_BypassesCacheAndExecutesQuery()
+        {
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output 'BypassCache'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            var mockFs = new MockFileSystem();
+            mockFs.FileExistsDefault = false;
+            var dataFiles = new QuickAccessDataFiles(mockFs);
+            var executor = new ScriptExecutor(
+                _mockFileSystem.Object,
+                _mockScriptStorage.Object,
+                dataFiles);
+
+            var result = await executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+
+            Assert.IsNotNull(result);
+            Assert.AreEqual(1, result.Count);
+            Assert.AreEqual("BypassCache", result[0]);
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithCache_CachedResultInvalidatedWhenBackingFileDisappears()
+        {
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Date -Format 'HH:mm:ss.ffffff'; exit 0";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            bool backingFileExists = true;
+            var mockFs = new Mock<IFileSystem>(MockBehavior.Strict);
+            mockFs.Setup(fs => fs.FileExists(It.IsAny<string>()))
+                .Returns(() => backingFileExists);
+            mockFs.Setup(fs => fs.GetLastWriteTime(It.IsAny<string>()))
+                .Returns(DateTime.Now);
+            var dataFiles = new QuickAccessDataFiles(mockFs.Object);
+            var executor = new ScriptExecutor(
+                _mockFileSystem.Object,
+                _mockScriptStorage.Object,
+                dataFiles);
+
+            // First call: backing file exists, result is cached.
+            var result1 = await executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+            Assert.IsNotNull(result1);
+            Assert.AreEqual(1, result1.Count);
+
+            // Backing file disappears. Cache should be bypassed and query re-executed.
+            backingFileExists = false;
+            await Task.Delay(10); // ensure timestamp differs
+
+            var result2 = await executor.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null);
+            Assert.IsNotNull(result2);
+            Assert.AreEqual(1, result2.Count);
+
+            // Output should differ (Get-Date) — prove it was re-executed, not returned from cache.
+            Assert.AreNotEqual(result1[0], result2[0],
+                "PowerShell should be re-executed when the backing file disappears; cached result must not be returned.");
+        }
+
         #endregion
 
         #region File System Integration Tests

@@ -8,7 +8,7 @@ using Wincent;
 namespace TestWincent
 {
     /// <summary>
-    /// 用于测试的模拟文件系统实现
+    /// Mock file system implementation for testing.
     /// </summary>
     public class MockFileSystem : IFileSystem
     {
@@ -19,40 +19,40 @@ namespace TestWincent
 
         public MockFileSystem()
         {
-            // 默认文件不存在
+            // Default: file does not exist
             FileExistsDefault = false;
-            // 默认时间戳
+            // Default timestamp
             LastWriteTimeDefault = DateTime.Now;
         }
 
-        // 默认的文件存在状态
+        // Default file existence state
         public bool FileExistsDefault { get; set; }
 
-        // 默认的文件时间戳
+        // Default file timestamp
         public DateTime LastWriteTimeDefault { get; set; }
 
-        // 模拟文件存在状态
+        // Simulate file existence
         public void SetFileExists(string path, bool exists)
         {
             _fileExistsResults[path] = exists;
         }
 
-        // 模拟文件时间戳
+        // Simulate file timestamp
         public void SetLastWriteTime(string path, DateTime timestamp)
         {
             _fileTimestamps[path] = timestamp;
         }
 
-        // 设置删除文件时的回调
+        // Set delete file callback
         public void SetDeleteFileCallback(Action<string> callback)
         {
             _onDeleteFile = callback;
         }
 
-        // 获取被删除的文件列表
+        // Get list of deleted files
         public IReadOnlyList<string> DeletedFiles => _deletedFiles;
 
-        // 实现 IFileSystem 接口
+        // IFileSystem implementation
         public bool FileExists(string path)
         {
             return _fileExistsResults.ContainsKey(path) ? _fileExistsResults[path] : FileExistsDefault;
@@ -93,8 +93,8 @@ namespace TestWincent
             quickAccess.RemoveRecentFile();
 
             // Assert
-            Assert.IsTrue(fileDeleted, "文件应该被删除");
-            Assert.IsTrue(mockFileSystem.DeletedFiles.Contains(recentFilesPath), "最近访问文件应该在被删除文件列表中");
+            Assert.IsTrue(fileDeleted, "File should be deleted");
+            Assert.IsTrue(mockFileSystem.DeletedFiles.Contains(recentFilesPath), "Recent files should be in deleted files list");
         }
 
         [TestMethod]
@@ -126,7 +126,7 @@ namespace TestWincent
             quickAccess.RemoveRecentFile();
 
             // Assert
-            Assert.AreEqual(0, mockFileSystem.DeletedFiles.Count, "不存在的文件不应该被删除");
+            Assert.AreEqual(0, mockFileSystem.DeletedFiles.Count, "Non-existent files should not be deleted");
         }
 
         [TestMethod]
@@ -136,12 +136,14 @@ namespace TestWincent
             // Arrange
             var mockFileSystem = new MockFileSystem();
             mockFileSystem.FileExistsDefault = true;
-            mockFileSystem.SetDeleteFileCallback(_ => throw new IOException("测试异常"));
+            mockFileSystem.SetDeleteFileCallback(_ => throw new IOException("Test exception"));
 
             var quickAccess = new QuickAccessDataFiles(mockFileSystem);
 
-            // Act - 应该抛出异常
+            // Act
             quickAccess.RemoveRecentFile();
+
+            // Assert - ExpectedException handles verification
         }
 
         [TestMethod]
@@ -189,7 +191,7 @@ namespace TestWincent
         {
             // Arrange
             var recentTime = new DateTime(2023, 5, 15);
-            var frequentTime = new DateTime(2023, 6, 20); // 更近的时间
+            var frequentTime = new DateTime(2023, 6, 20); // more recent time
 
             var mockFileSystem = new MockFileSystem();
             mockFileSystem.FileExistsDefault = true;
@@ -202,7 +204,7 @@ namespace TestWincent
             // Act
             var result = quickAccess.GetQuickAccessModifiedTime();
 
-            // Assert - 应该返回最新的时间
+            // Assert - should return the most recent time
             Assert.AreEqual(frequentTime, result);
         }
 
@@ -252,10 +254,25 @@ namespace TestWincent
             // Act
             var result = quickAccess.GetModifiedTimeForScript(PSScript.RefreshExplorer);
 
-            // Assert - 非查询脚本应返回接近当前时间的值
+            // Assert - non-query scripts should return a value close to current time
             var now = DateTime.Now;
             var timeDifference = (now - result).TotalSeconds;
-            Assert.IsTrue(timeDifference < 5); // 允许5秒的误差
+            Assert.IsTrue(timeDifference < 5); // allow 5-second tolerance
+        }
+
+        [TestMethod]
+        public void GetModifiedTimeForScript_QueryScript_FileMissing_ThrowsFileNotFoundException()
+        {
+            var mockFileSystem = new MockFileSystem();
+            mockFileSystem.FileExistsDefault = false;
+            var quickAccess = new QuickAccessDataFiles(mockFileSystem);
+
+            Assert.ThrowsException<FileNotFoundException>(
+                () => quickAccess.GetModifiedTimeForScript(PSScript.QueryRecentFile));
+            Assert.ThrowsException<FileNotFoundException>(
+                () => quickAccess.GetModifiedTimeForScript(PSScript.QueryFrequentFolder));
+            Assert.ThrowsException<FileNotFoundException>(
+                () => quickAccess.GetModifiedTimeForScript(PSScript.QueryQuickAccess));
         }
 
         [TestMethod]
@@ -268,27 +285,23 @@ namespace TestWincent
 
             var quickAccess = new QuickAccessDataFiles(mockFileSystem);
 
-            // Act - 应该抛出异常
+            // Act - should throw exception
             var result = quickAccess.GetRecentFilesModifiedTime();
 
-            // Assert - 通过 ExpectedException 特性验证
+            // Assert - verified via ExpectedException attribute
         }
 
         [TestMethod]
         [ExpectedException(typeof(IOException))]
-        public void GetRecentFilesModifiedTime_ThrowsException_PropagatesException()
+        public void GetRecentFilesModifiedTime_GetLastWriteTimeThrows_ThrowsIOException()
         {
-            // Arrange
-            var mockFileSystem = new MockFileSystem();
-            mockFileSystem.FileExistsDefault = true;
-
-            // 设置获取时间时抛出异常
+            // Arrange: use a file system that throws when getting the last write time
             var quickAccess = new QuickAccessDataFiles(new ThrowingFileSystem());
 
-            // Act - 应该抛出异常
+            // Act - should throw IOException wrapping the underlying error
             var result = quickAccess.GetRecentFilesModifiedTime();
 
-            // Assert - 通过 ExpectedException 特性验证
+            // Assert - verified via ExpectedException attribute
         }
 
         [TestMethod]
@@ -301,10 +314,10 @@ namespace TestWincent
 
             var quickAccess = new QuickAccessDataFiles(mockFileSystem);
 
-            // Act - 应该抛出异常
+            // Act - should throw exception
             var result = quickAccess.GetFrequentFoldersModifiedTime();
 
-            // Assert - 通过 ExpectedException 特性验证
+            // Assert - verified via ExpectedException attribute
         }
 
         [TestMethod]
@@ -314,10 +327,10 @@ namespace TestWincent
             var expectedTime = new DateTime(2023, 5, 15);
             var mockFileSystem = new MockFileSystem();
 
-            // 设置最近文件存在但常用文件夹不存在
-            mockFileSystem.SetFileExists("任意路径", false); // 设置默认为不存在
+            // Set recent file exists but frequent folder does not exist
+            mockFileSystem.SetFileExists("any", false); // default to not exist
             var quickAccess = new QuickAccessDataFiles(mockFileSystem);
-            mockFileSystem.SetFileExists(quickAccess.RecentFilesPath, true); // 设置最近文件存在
+            mockFileSystem.SetFileExists(quickAccess.RecentFilesPath, true); // set recent file exists
             mockFileSystem.SetLastWriteTime(quickAccess.RecentFilesPath, expectedTime);
 
             // Act
@@ -334,10 +347,10 @@ namespace TestWincent
             var expectedTime = new DateTime(2023, 6, 20);
             var mockFileSystem = new MockFileSystem();
 
-            // 设置常用文件夹存在但最近文件不存在
-            mockFileSystem.SetFileExists("任意路径", false); // 设置默认为不存在
+            // Set frequent folder exists but recent file does not exist
+            mockFileSystem.SetFileExists("any", false); // default to not exist
             var quickAccess = new QuickAccessDataFiles(mockFileSystem);
-            mockFileSystem.SetFileExists(quickAccess.FrequentFoldersPath, true); // 设置常用文件夹存在
+            mockFileSystem.SetFileExists(quickAccess.FrequentFoldersPath, true); // set frequent folder exists
             mockFileSystem.SetLastWriteTime(quickAccess.FrequentFoldersPath, expectedTime);
 
             // Act
@@ -353,35 +366,35 @@ namespace TestWincent
         {
             // Arrange
             var mockFileSystem = new MockFileSystem();
-            mockFileSystem.FileExistsDefault = false; // 设置所有文件都不存在
+            mockFileSystem.FileExistsDefault = false; // set all files to not exist
 
             var quickAccess = new QuickAccessDataFiles(mockFileSystem);
 
-            // Act - 应该抛出异常
+            // Act - should throw exception
             var result = quickAccess.GetQuickAccessModifiedTime();
 
-            // Assert - 通过 ExpectedException 特性验证
+            // Assert - verified via ExpectedException attribute
         }
     }
 
     /// <summary>
-    /// 总是抛出异常的文件系统实现
+    /// File system implementation that always throws exceptions.
     /// </summary>
     public class ThrowingFileSystem : IFileSystem
     {
         public bool FileExists(string path)
         {
-            return true; // 文件总是存在
+            return true; // file always exists
         }
 
         public void DeleteFile(string path)
         {
-            throw new IOException("测试删除异常");
+            throw new IOException("Test delete exception");
         }
 
         public DateTime GetLastWriteTime(string path)
         {
-            throw new IOException("测试获取时间异常");
+            throw new IOException("Test get time exception");
         }
     }
 
