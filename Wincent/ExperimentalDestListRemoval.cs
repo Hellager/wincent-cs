@@ -169,16 +169,27 @@ namespace Wincent
             _fileSystem.DeleteFile(destinationPath);
             bool destinationDeleted = true;
 
-            var deletedLinks = DeleteMatchingRecentLinks(recentFolder, requestedPaths);
-            var deletedShortcutPaths = deletedLinks.Select(link => link.ShortcutPath).ToList();
-            var missingShortcutTargetPaths = requestedPaths
-                .Where(target => !deletedLinks.Any(link => WindowsPathComparer.Equals(link.TargetPath, target)))
-                .ToList();
+            IReadOnlyList<string> deletedShortcutPaths = new List<string>().AsReadOnly();
+            IReadOnlyList<string> missingShortcutTargetPaths = new List<string>().AsReadOnly();
+            RebuildWaitResult rebuild;
+            try
+            {
+                var deletedLinks = DeleteMatchingRecentLinks(recentFolder, requestedPaths);
+                deletedShortcutPaths = deletedLinks.Select(link => link.ShortcutPath).ToList().AsReadOnly();
+                missingShortcutTargetPaths = requestedPaths
+                    .Where(target => !deletedLinks.Any(link => WindowsPathComparer.Equals(link.TargetPath, target)))
+                    .ToList().AsReadOnly();
 
-            _explorerRefresher.Refresh(TimeSpan.FromSeconds(10));
-            _delay.Sleep(options.RebuildDelay);
+                _explorerRefresher.Refresh(TimeSpan.FromSeconds(10));
+                _delay.Sleep(options.RebuildDelay);
 
-            var rebuild = WaitForRebuiltDestination(destinationPath, requestedPaths, RebuildPollTimeout);
+                rebuild = WaitForRebuiltDestination(destinationPath, requestedPaths, RebuildPollTimeout);
+            }
+            catch (Exception ex)
+            {
+                rebuild = new RebuildWaitResult(false, null, ex.Message, new List<string>());
+            }
+
             bool success = rebuild.Rebuilt && rebuild.RemainingPathsAfterRebuild.Count == 0;
 
             return new ExperimentalRemoveReport(

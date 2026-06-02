@@ -102,25 +102,17 @@ namespace Wincent
 
             if (destList.Length < 32)
             {
-                return new DestList
-                {
-                    Version = 0,
-                    DeclaredEntryCount = 0,
-                    PinnedEntryCount = 0,
-                    LastEntryId = 0,
-                    LastEntryNumber = 0,
-                    LastEntryNumberReserved = 0,
-                    LastRevisionNumber = 0,
-                    LastRevisionNumberReserved = 0,
-                    Entries = new List<DestListEntry>()
-                };
+                throw new DestListParseException(
+                    filePath,
+                    null,
+                    $"DestList stream too short: {destList.Length} bytes (minimum 32 required).");
             }
 
             uint version = ReadUInt32(destList, 0, filePath);
             if (version != 1 && version != 3 && version != 4 && version != 6)
                 throw new DestListUnsupportedVersionException(filePath, 0, version);
 
-            int declaredEntryCount = checked((int)ReadUInt32(destList, 4, filePath));
+            int declaredEntryCount = ToInt32Safe(ReadUInt32(destList, 4, filePath), filePath, 4);
             // Offset 8 is also exposed as LastEntryId below; keep the low 32-bit view
             // for the legacy pinned-count field until the format mapping is tightened.
             uint pinnedEntryCount = ReadUInt32(destList, 8, filePath);
@@ -238,7 +230,19 @@ namespace Wincent
                 return null;
 
             uint spsSize = ReadUInt32(destList, pathEnd, filePath);
-            int entryEnd = checked(pathEnd + 4 + checked((int)spsSize));
+            int spsSizeInt = ToInt32Safe(spsSize, filePath, offset);
+            int entryEnd;
+            try
+            {
+                entryEnd = checked(pathEnd + 4 + spsSizeInt);
+            }
+            catch (OverflowException)
+            {
+                throw new DestListParseException(
+                    filePath,
+                    offset,
+                    $"Entry end overflow: pathEnd={pathEnd}, spsSize={spsSizeInt}.");
+            }
             if (entryEnd > destList.Length)
                 return null;
 
@@ -365,19 +369,19 @@ namespace Wincent
                 return null;
 
             int linkInfoStart = offset;
-            int linkInfoSize = checked((int)ReadUInt32(data, linkInfoStart, null));
-            int linkInfoHeaderSize = checked((int)ReadUInt32(data, linkInfoStart + 4, null));
-            int linkInfoEnd = checked(linkInfoStart + linkInfoSize);
+            int linkInfoSize = ToInt32Safe(ReadUInt32(data, linkInfoStart, null), null, linkInfoStart);
+            int linkInfoHeaderSize = ToInt32Safe(ReadUInt32(data, linkInfoStart + 4, null), null, linkInfoStart + 4);
+            int linkInfoEnd = CheckedAdd(linkInfoStart, linkInfoSize, null, linkInfoStart);
             if (linkInfoSize < 28 || linkInfoEnd > data.Length)
                 return null;
 
-            int localBaseOffset = checked((int)ReadUInt32(data, linkInfoStart + 16, null));
-            int commonSuffixOffset = checked((int)ReadUInt32(data, linkInfoStart + 24, null));
+            int localBaseOffset = ToInt32Safe(ReadUInt32(data, linkInfoStart + 16, null), null, linkInfoStart + 16);
+            int commonSuffixOffset = ToInt32Safe(ReadUInt32(data, linkInfoStart + 24, null), null, linkInfoStart + 24);
             int localBaseUnicodeOffset = linkInfoHeaderSize >= 0x24 && linkInfoStart + 32 <= data.Length
-                ? checked((int)ReadUInt32(data, linkInfoStart + 28, null))
+                ? ToInt32Safe(ReadUInt32(data, linkInfoStart + 28, null), null, linkInfoStart + 28)
                 : 0;
             int commonSuffixUnicodeOffset = linkInfoHeaderSize >= 0x24 && linkInfoStart + 36 <= data.Length
-                ? checked((int)ReadUInt32(data, linkInfoStart + 32, null))
+                ? ToInt32Safe(ReadUInt32(data, linkInfoStart + 32, null), null, linkInfoStart + 32)
                 : 0;
 
             string basePath = ReadUtf16ZStringInLinkInfo(data, linkInfoStart, linkInfoSize, localBaseUnicodeOffset)
@@ -402,8 +406,8 @@ namespace Wincent
             if (relativeOffset == 0 || relativeOffset >= linkInfoSize)
                 return null;
 
-            int absoluteOffset = checked(linkInfoStart + relativeOffset);
-            int linkInfoEnd = checked(linkInfoStart + linkInfoSize);
+            int absoluteOffset = CheckedAdd(linkInfoStart, relativeOffset, null, linkInfoStart);
+            int linkInfoEnd = CheckedAdd(linkInfoStart, linkInfoSize, null, linkInfoStart);
             return ReadCString(data, absoluteOffset, linkInfoEnd);
         }
 
@@ -412,8 +416,8 @@ namespace Wincent
             if (relativeOffset == 0 || relativeOffset >= linkInfoSize)
                 return null;
 
-            int absoluteOffset = checked(linkInfoStart + relativeOffset);
-            int linkInfoEnd = checked(linkInfoStart + linkInfoSize);
+            int absoluteOffset = CheckedAdd(linkInfoStart, relativeOffset, null, linkInfoStart);
+            int linkInfoEnd = CheckedAdd(linkInfoStart, linkInfoSize, null, linkInfoStart);
             return ReadUtf16ZString(data, absoluteOffset, linkInfoEnd);
         }
 
@@ -537,6 +541,55 @@ namespace Wincent
             return BitConverter.ToUInt64(data, offset);
         }
 
+        private static int ToInt32Safe(ulong value, string filePath, long? offset)
+        {
+            try
+            {
+                return checked((int)value);
+            }
+            catch (OverflowException)
+            {
+                throw new DestListParseException(filePath, offset, $"Value too large for int32: {value}.");
+            }
+        }
+
+        private static int ToInt32Safe(uint value, string filePath, long? offset)
+        {
+            try
+            {
+                return checked((int)value);
+            }
+            catch (OverflowException)
+            {
+                throw new DestListParseException(filePath, offset, $"Value too large for int32: {value}.");
+            }
+        }
+
+        private static int CheckedAdd(int a, int b, string filePath, long? offset)
+        {
+            try
+            {
+                return checked(a + b);
+            }
+            catch (OverflowException)
+            {
+                throw new DestListParseException(filePath, offset, $"Addition overflow: {a} + {b}.");
+            }
+        }
+
+        private static int SectorDataOffset(uint sectorId, int sectorSize)
+        {
+            int id = ToInt32Safe(sectorId, null, sectorId);
+            try
+            {
+                return checked((id + 1) * sectorSize);
+            }
+            catch (OverflowException)
+            {
+                throw new DestListParseException(null, sectorId, $"Sector offset overflow for sector {sectorId} (sector size {sectorSize}).");
+            }
+        }
+
         private sealed class CompoundFile
         {
             private const uint EndOfChain = 0xFFFF_FFFE;
@@ -616,7 +669,7 @@ namespace Wincent
                     sectorSize,
                     fat,
                     root.StartSector,
-                    checked((int)root.StreamSize),
+                    ToInt32Safe(root.StreamSize, filePath, null),
                     filePath);
 
                 List<uint> miniFat;
@@ -626,12 +679,26 @@ namespace Wincent
                 }
                 else
                 {
+                    int numSectors = ToInt32Safe(numMiniFatSectors, filePath, 0x40);
+                    int miniFatSize;
+                    try
+                    {
+                        miniFatSize = checked(numSectors * sectorSize);
+                    }
+                    catch (OverflowException)
+                    {
+                        throw new DestListParseException(
+                            filePath,
+                            0x40,
+                            $"Mini FAT size overflow: {numSectors} sectors * {sectorSize}.");
+                    }
+
                     byte[] miniFatBytes = ReadRegularStreamSized(
                         data,
                         sectorSize,
                         fat,
                         firstMiniFatSector,
-                        checked((int)numMiniFatSectors * sectorSize),
+                        miniFatSize,
                         filePath);
 
                     miniFat = new List<uint>();
@@ -649,7 +716,7 @@ namespace Wincent
                 if (entry == null)
                     return null;
 
-                int size = checked((int)entry.StreamSize);
+                int size = ToInt32Safe(entry.StreamSize, null, null);
                 if (size < MiniCutoffSize)
                     return ReadMiniStream(entry.StartSector, size);
 
@@ -665,8 +732,20 @@ namespace Wincent
                 var outBytes = new List<byte>(size);
                 foreach (uint miniSector in chain)
                 {
-                    int offset = checked((int)miniSector * MiniSectorSize);
-                    int end = offset + MiniSectorSize;
+                    int miniSectorInt = ToInt32Safe(miniSector, null, miniSector);
+                    int offset;
+                    try
+                    {
+                        offset = checked(miniSectorInt * MiniSectorSize);
+                    }
+                    catch (OverflowException)
+                    {
+                        throw new DestListParseException(
+                            null,
+                            miniSectorInt,
+                            $"Mini sector offset overflow: {miniSectorInt} * {MiniSectorSize}.");
+                    }
+                    int end = CheckedAdd(offset, MiniSectorSize, null, miniSector);
                     if (offset < 0 || end > _rootStream.Length)
                         throw new DestListParseException(null, offset, $"mini sector {miniSector} is out of bounds");
 
@@ -743,7 +822,7 @@ namespace Wincent
                     if (sector == FreeSector)
                         throw new DestListParseException(null, null, $"invalid sector marker {sector:#x} in chain");
 
-                    int index = checked((int)sector);
+                    int index = ToInt32Safe(sector, null, sector);
                     if (index >= fat.Count)
                         throw new DestListParseException(null, null, $"sector {sector} is outside the FAT");
 
@@ -788,8 +867,8 @@ namespace Wincent
 
             private static byte[] SectorSlice(byte[] data, int sectorSize, uint sectorId)
             {
-                int offset = checked((int)(sectorId + 1) * sectorSize);
-                int end = checked(offset + sectorSize);
+                int offset = SectorDataOffset(sectorId, sectorSize);
+                int end = CheckedAdd(offset, sectorSize, null, sectorId);
                 if (offset < 0 || end > data.Length)
                     throw new DestListParseException(null, null, $"sector {sectorId} is out of bounds");
 
@@ -798,11 +877,11 @@ namespace Wincent
 
             private static byte[] StreamSectorSlice(byte[] data, int sectorSize, uint sectorId)
             {
-                int offset = checked((int)(sectorId + 1) * sectorSize);
+                int offset = SectorDataOffset(sectorId, sectorSize);
                 if (offset >= data.Length)
                     throw new DestListParseException(null, null, $"sector {sectorId} is out of bounds");
 
-                int end = Math.Min(checked(offset + sectorSize), data.Length);
+                int end = Math.Min(CheckedAdd(offset, sectorSize, null, sectorId), data.Length);
                 return SliceBytes(data, offset, end - offset);
             }
 

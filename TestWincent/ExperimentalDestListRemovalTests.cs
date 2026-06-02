@@ -85,18 +85,52 @@ namespace TestWincent
                     new ExperimentalRemoveOptions()));
         }
 
+        [TestMethod]
+        public void RemoveEntryPathsByRebuild_ShortcutsDeleted_PreservedWhenPostDeleteFails()
+        {
+            var reader = new StubDestListReader();
+            reader.Responses.Enqueue(CreateDestinations(@"C:\Target\a.txt", @"C:\Other\b.txt"));
+            reader.Responses.Enqueue(CreateDestinations(@"C:\Other\b.txt"));
+            var recentLinks = new StubRecentLinkFileSystem(new[]
+            {
+                @"C:\Recent\a.lnk",
+                @"C:\Recent\b.lnk"
+            });
+            var resolver = new StubShortcutTargetResolver(new Dictionary<string, string>
+            {
+                [@"C:\Recent\a.lnk"] = @"C:\Target\a.txt",
+                [@"C:\Recent\b.lnk"] = @"C:\Other\b.txt"
+            });
+            var refresher = new StubExplorerRefresher { ShouldThrow = true };
+            var engine = CreateEngine(reader, recentLinks, resolver, refresher: refresher);
+
+            var report = engine.RemoveEntryPathsByRebuild(
+                AutomaticDestinationsKind.RecentFiles,
+                new[] { @"C:\Target\a.txt" },
+                new ExperimentalRemoveOptions());
+
+            Assert.IsTrue(report.DestinationDeleted, "Destination should be deleted.");
+            Assert.IsFalse(report.Success, "Recover should fail when rebuild is not reachable.");
+            CollectionAssert.AreEqual(
+                new[] { @"C:\Recent\a.lnk" },
+                new List<string>(report.DeletedShortcutPaths),
+                "Deleted shortcuts must be reported even when a later step fails.");
+            Assert.IsNotNull(report.RebuildParseError, "Error detail must be captured.");
+        }
+
         private static ExperimentalDestListRemovalEngine CreateEngine(
             StubDestListReader reader = null,
             StubRecentLinkFileSystem recentLinks = null,
             StubShortcutTargetResolver resolver = null,
-            StubExperimentalRemovalFileSystem fileSystem = null)
+            StubExperimentalRemovalFileSystem fileSystem = null,
+            StubExplorerRefresher refresher = null)
         {
             return new ExperimentalDestListRemovalEngine(
                 new StubDataFiles(),
                 new StubRecentFolder(@"C:\Recent"),
                 resolver ?? new StubShortcutTargetResolver(new Dictionary<string, string>()),
                 recentLinks ?? new StubRecentLinkFileSystem(Array.Empty<string>()),
-                new StubExplorerRefresher(),
+                refresher ?? new StubExplorerRefresher(),
                 reader ?? new StubDestListReader(CreateDestinations()),
                 new StubDelay(),
                 fileSystem ?? new StubExperimentalRemovalFileSystem());
@@ -175,8 +209,12 @@ namespace TestWincent
 
         private sealed class StubExplorerRefresher : IExplorerRefresher
         {
+            public bool ShouldThrow { get; set; }
+
             public void Refresh(TimeSpan timeout)
             {
+                if (ShouldThrow)
+                    throw new InvalidOperationException("Simulated explorer refresh failure.");
             }
         }
 

@@ -81,6 +81,56 @@ namespace TestWincent
             Assert.IsNotNull(parsed.DestList);
         }
 
+        [TestMethod]
+        public void ParseBytes_RejectsOversizedStreamSize_ThrowsDestListParseException()
+        {
+            byte[] data = BuildCfbWithInflatedStreamSize();
+
+            var exception = Assert.ThrowsException<DestListParseException>(
+                () => DestListMetadataParser.ParseBytes(data));
+
+            StringAssert.Contains(exception.Details, "int32");
+        }
+
+        [TestMethod]
+        public void ParseBytes_RejectsTruncatedDestListStream_ThrowsDestListParseException()
+        {
+            byte[] file = new byte[512 + 512 * 4];
+            file[0] = 0xD0; file[1] = 0xCF; file[2] = 0x11; file[3] = 0xE0;
+            file[4] = 0xA1; file[5] = 0xB1; file[6] = 0x1A; file[7] = 0xE1;
+            WriteUInt16(file, 0x1e, 9);
+            WriteUInt16(file, 0x20, 6);
+            WriteUInt32(file, 0x30, 0);
+            WriteUInt32(file, 0x38, 0);
+            WriteUInt32(file, 0x3c, 0xFFFFFFFF);
+            WriteUInt32(file, 0x40, 0);
+            WriteUInt32(file, 0x44, 0xFFFFFFFF);
+            WriteUInt32(file, 0x48, 0);
+            for (int i = 0; i < 109; i++)
+                WriteUInt32(file, 0x4c + i * 4, 0xFFFFFFFF);
+            WriteUInt32(file, 0x4c, 3);
+
+            int directoryOffset = 512;
+            WriteDirectoryEntry(file, directoryOffset, "Root Entry", 5, 1, 0);
+            WriteDirectoryEntry(file, directoryOffset + 128, "DestList", 2, 2, 10);
+
+            byte[] shortStream = new byte[10];
+            Array.Copy(shortStream, 0, file, 512 + 512 * 2, 10);
+
+            int fatOffset = 512 + 512 * 3;
+            for (int i = 0; i < 128; i++)
+                WriteUInt32(file, fatOffset + i * 4, 0xFFFFFFFF);
+            WriteUInt32(file, fatOffset, 0xFFFFFFFE);
+            WriteUInt32(file, fatOffset + 4, 0xFFFFFFFE);
+            WriteUInt32(file, fatOffset + 8, 0xFFFFFFFE);
+            WriteUInt32(file, fatOffset + 12, 0xFFFFFFFD);
+
+            var exception = Assert.ThrowsException<DestListParseException>(
+                () => DestListMetadataParser.ParseBytes(file));
+
+            StringAssert.Contains(exception.Details, "too short");
+        }
+
         private static byte[] BuildMinimalCfbWithDestList(string path)
         {
             byte[] destList = BuildDestList(path);
@@ -109,6 +159,42 @@ namespace TestWincent
             int directoryOffset = 512;
             WriteDirectoryEntry(file, directoryOffset, "Root Entry", 5, 1, 0);
             WriteDirectoryEntry(file, directoryOffset + 128, "DestList", 2, 2, (ulong)destList.Length);
+
+            Array.Copy(destList, 0, file, 512 + 512 * 2, destList.Length);
+
+            int fatOffset = 512 + 512 * 3;
+            for (int i = 0; i < 128; i++)
+                WriteUInt32(file, fatOffset + i * 4, 0xFFFFFFFF);
+            WriteUInt32(file, fatOffset, 0xFFFFFFFE);
+            WriteUInt32(file, fatOffset + 4, 0xFFFFFFFE);
+            WriteUInt32(file, fatOffset + 8, 0xFFFFFFFE);
+            WriteUInt32(file, fatOffset + 12, 0xFFFFFFFD);
+
+            return file;
+        }
+
+        private static byte[] BuildCfbWithInflatedStreamSize()
+        {
+            byte[] destList = BuildDestList(@"C:\Test\file.txt");
+            byte[] file = new byte[512 + 512 * 4];
+
+            file[0] = 0xD0; file[1] = 0xCF; file[2] = 0x11; file[3] = 0xE0;
+            file[4] = 0xA1; file[5] = 0xB1; file[6] = 0x1A; file[7] = 0xE1;
+            WriteUInt16(file, 0x1e, 9);
+            WriteUInt16(file, 0x20, 6);
+            WriteUInt32(file, 0x30, 0);
+            WriteUInt32(file, 0x38, 0);
+            WriteUInt32(file, 0x3c, 0xFFFFFFFF);
+            WriteUInt32(file, 0x40, 0);
+            WriteUInt32(file, 0x44, 0xFFFFFFFF);
+            WriteUInt32(file, 0x48, 0);
+            for (int i = 0; i < 109; i++)
+                WriteUInt32(file, 0x4c + i * 4, 0xFFFFFFFF);
+            WriteUInt32(file, 0x4c, 3);
+
+            int directoryOffset = 512;
+            WriteDirectoryEntry(file, directoryOffset, "Root Entry", 5, 1, 0);
+            WriteDirectoryEntry(file, directoryOffset + 128, "DestList", 2, 2, ((ulong)int.MaxValue) + 1);
 
             Array.Copy(destList, 0, file, 512 + 512 * 2, destList.Length);
 
