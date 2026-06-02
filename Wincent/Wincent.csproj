@@ -55,7 +55,10 @@
     <Compile Include="Infrastructure\StaThreadRunner.cs" />
     <Compile Include="Infrastructure\WindowsPathComparer.cs" />
     <Compile Include="Infrastructure\WindowsRecentFolder.cs" />
-    <Compile Include="Phase0Types.cs" />
+    <Compile Include="RetryPolicy.cs" />
+    <Compile Include="QuickAccessOptions.cs" />
+    <Compile Include="QuickAccessBatch.cs" />
+    <Compile Include="QuickAccessLockTypes.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="QuickAccessDataFiles.cs" />
     <Compile Include="QuickAccessExplorerRefresher.cs" />

@@ -1012,7 +1012,7 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void PublicApi_ExportsOnlyPhase0Surface()
+        public void PublicApi_ExportsOnlySupportedSurface()
         {
             var expected = new List<string>
             {
