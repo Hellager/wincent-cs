@@ -29,5 +29,28 @@ namespace TestWincent
         {
             Assert.IsFalse(WindowsPathComparer.Equals(@"C:\One", @"C:\Two"));
         }
+
+        [TestMethod]
+        public void Equals_DriveRoots_CompareCorrectly()
+        {
+            Assert.IsTrue(WindowsPathComparer.Equals(@"C:\", @"C:\"));
+            Assert.IsTrue(WindowsPathComparer.Equals(@"C:\", @"C:/"));
+            Assert.IsFalse(WindowsPathComparer.Equals(@"C:\", @"D:\"));
+        }
+
+        [TestMethod]
+        public void Equals_UncRoots_CompareCorrectly()
+        {
+            Assert.IsTrue(WindowsPathComparer.Equals(@"\\server\share\", @"\\server\share"));
+            Assert.IsTrue(WindowsPathComparer.Equals(@"\\server\share\", @"//server/share/"));
+            Assert.IsFalse(WindowsPathComparer.Equals(@"\\server\share\", @"\\server\other\"));
+        }
+
+        [TestMethod]
+        public void Equals_ResolvesToRoot()
+        {
+            Assert.IsTrue(WindowsPathComparer.Equals(@"C:\Folder\..", @"C:\"));
+            Assert.IsFalse(WindowsPathComparer.Equals(@"C:\Folder\..", @"C:\not-root"));
+        }
     }
 }

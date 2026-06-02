@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace Wincent
@@ -36,21 +35,22 @@ namespace Wincent
             StaThreadRunner.Run(
                 () =>
                 {
-                    var folder = OpenNamespace(ShellNamespaces.QuickAccess);
-                    foreach (dynamic item in EnumerateItems(folder))
+                    bool found = false;
+                    ForEachItemInNamespace(ShellNamespaces.QuickAccess, (dynamic item) =>
                     {
                         if (Convert.ToBoolean(item.IsFolder))
-                            continue;
+                            return false;
 
-                        string itemPath = item.Path as string;
-                        if (!WindowsPathComparer.Equals(itemPath, path))
-                            continue;
+                        if (!WindowsPathComparer.Equals(item.Path as string, path))
+                            return false;
 
                         item.InvokeVerb("remove");
-                        return;
-                    }
+                        found = true;
+                        return true;
+                    });
 
-                    throw new QuickAccessItemNotFoundException(path, QuickAccess.RecentFiles);
+                    if (!found)
+                        throw new QuickAccessItemNotFoundException(path, QuickAccess.RecentFiles);
                 },
                 timeout,
                 _nativeMethods);
@@ -61,10 +61,22 @@ namespace Wincent
             StaThreadRunner.Run(
                 () =>
                 {
-                    if (IsInFrequentFolders(path))
+                    bool exists = false;
+                    ForEachItemInNamespace(ShellNamespaces.FrequentFolders, (dynamic item) =>
+                    {
+                        if (WindowsPathComparer.Equals(item.Path as string, path))
+                        {
+                            exists = true;
+                            return true;
+                        }
+
+                        return false;
+                    });
+
+                    if (exists)
                         return;
 
-                    InvokeVerbOnSelf(path, "pintohome");
+                    InvokeVerbOnSelfFolder(path, "pintohome");
                 },
                 timeout,
                 _nativeMethods);
@@ -75,108 +87,137 @@ namespace Wincent
             StaThreadRunner.Run(
                 () =>
                 {
-                    if (!IsInFrequentFolders(path))
+                    bool exists = false;
+                    ForEachItemInNamespace(ShellNamespaces.FrequentFolders, (dynamic item) =>
+                    {
+                        if (WindowsPathComparer.Equals(item.Path as string, path))
+                        {
+                            exists = true;
+                            return true;
+                        }
+
+                        return false;
+                    });
+
+                    if (!exists)
                         throw new QuickAccessItemNotFoundException(path, QuickAccess.FrequentFolders);
 
                     try
                     {
-                        FindAndInvokeVerb(path, "unpinfromhome");
-                        return;
-                    }
-                    catch (QuickAccessItemNotFoundException)
-                    {
-                        throw;
+                        bool applied = false;
+                        ForEachItemInNamespace(ShellNamespaces.FrequentFolders, (dynamic item) =>
+                        {
+                            if (WindowsPathComparer.Equals(item.Path as string, path))
+                            {
+                                item.InvokeVerb("unpinfromhome");
+                                applied = true;
+                                return true;
+                            }
+
+                            return false;
+                        });
+
+                        if (applied)
+                            return;
                     }
                     catch (Exception)
                     {
-                        InvokeVerbOnSelf(path, "pintohome");
                     }
+
+                    InvokeVerbOnSelfFolder(path, "pintohome");
                 },
                 timeout,
                 _nativeMethods);
         }
 
-        private dynamic OpenNamespace(string @namespace)
+        private void ForEachItemInNamespace(string @namespace, Func<dynamic, bool> action)
         {
-            dynamic shellApplication = _shellApplicationFactory.CreateShellApplication();
-            dynamic folder = shellApplication.Namespace(@namespace);
-            if (folder == null)
-                throw new InvalidOperationException($"Failed to open shell namespace: {@namespace}");
+            object shellApplication = null;
+            object folder = null;
+            object items = null;
 
-            return folder;
-        }
-
-        private dynamic OpenFolder(string path)
-        {
-            dynamic shellApplication = _shellApplicationFactory.CreateShellApplication();
-            dynamic folder = shellApplication.Namespace(path);
-            if (folder == null)
-                throw new InvalidOperationException($"Failed to open shell folder: {path}");
-
-            return folder;
-        }
-
-        private IEnumerable<dynamic> EnumerateItems(dynamic folder)
-        {
-            dynamic items = folder.Items();
-            if (items == null)
-                throw new InvalidOperationException("Failed to enumerate shell folder items.");
-
-            int count = Convert.ToInt32(items.Count);
-            for (int index = 0; index < count; index++)
+            try
             {
-                dynamic item;
-                try
+                shellApplication = _shellApplicationFactory.CreateShellApplication();
+                dynamic shell = shellApplication;
+                folder = shell.Namespace(@namespace);
+                if (folder == null)
+                    throw new InvalidOperationException($"Failed to open shell namespace: {@namespace}");
+
+                dynamic folderObj = folder;
+                items = folderObj.Items();
+                if (items == null)
+                    throw new InvalidOperationException("Failed to enumerate shell folder items.");
+
+                int count = Convert.ToInt32(((dynamic)items).Count);
+                for (int index = 0; index < count; index++)
                 {
-                    item = items.Item(index);
+                    object item = null;
+                    try
+                    {
+                        item = ((dynamic)items).Item(index);
+                    }
+                    catch (COMException)
+                    {
+                        continue;
+                    }
+
+                    if (item == null)
+                        continue;
+
+                    try
+                    {
+                        if (action(item))
+                            return;
+                    }
+                    finally
+                    {
+                        if (item != null && Marshal.IsComObject(item))
+                            Marshal.FinalReleaseComObject(item);
+                    }
                 }
-                catch (COMException)
-                {
-                    continue;
-                }
-
-                if (item != null)
-                    yield return item;
             }
-        }
-
-        private bool IsInFrequentFolders(string path)
-        {
-            var folder = OpenNamespace(ShellNamespaces.FrequentFolders);
-            foreach (dynamic item in EnumerateItems(folder))
+            finally
             {
-                string itemPath = item.Path as string;
-                if (WindowsPathComparer.Equals(itemPath, path))
-                    return true;
+                if (items != null && Marshal.IsComObject(items))
+                    Marshal.FinalReleaseComObject(items);
+                if (folder != null && Marshal.IsComObject(folder))
+                    Marshal.FinalReleaseComObject(folder);
+                if (shellApplication != null && Marshal.IsComObject(shellApplication))
+                    Marshal.FinalReleaseComObject(shellApplication);
             }
-
-            return false;
         }
 
-        private void FindAndInvokeVerb(string path, string verb)
+        private void InvokeVerbOnSelfFolder(string path, string verb)
         {
-            var folder = OpenNamespace(ShellNamespaces.FrequentFolders);
-            foreach (dynamic item in EnumerateItems(folder))
+            object shellApplication = null;
+            object folder = null;
+            object self = null;
+
+            try
             {
-                string itemPath = item.Path as string;
-                if (!WindowsPathComparer.Equals(itemPath, path))
-                    continue;
+                shellApplication = _shellApplicationFactory.CreateShellApplication();
+                dynamic shell = shellApplication;
+                folder = shell.Namespace(path);
+                if (folder == null)
+                    throw new InvalidOperationException($"Failed to open shell folder: {path}");
 
-                item.InvokeVerb(verb);
-                return;
+                dynamic folderObj = folder;
+                self = folderObj.Self;
+                if (self == null)
+                    throw new InvalidOperationException($"Failed to get shell folder self item: {path}");
+
+                ((dynamic)self).InvokeVerb(verb);
             }
-
-            throw new QuickAccessItemNotFoundException(path, QuickAccess.FrequentFolders);
-        }
-
-        private void InvokeVerbOnSelf(string path, string verb)
-        {
-            dynamic folder = OpenFolder(path);
-            dynamic self = folder.Self;
-            if (self == null)
-                throw new InvalidOperationException($"Failed to get shell folder self item: {path}");
-
-            self.InvokeVerb(verb);
+            finally
+            {
+                if (self != null && Marshal.IsComObject(self))
+                    Marshal.FinalReleaseComObject(self);
+                if (folder != null && Marshal.IsComObject(folder))
+                    Marshal.FinalReleaseComObject(folder);
+                if (shellApplication != null && Marshal.IsComObject(shellApplication))
+                    Marshal.FinalReleaseComObject(shellApplication);
+            }
         }
     }
 

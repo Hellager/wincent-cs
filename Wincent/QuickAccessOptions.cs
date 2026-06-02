@@ -10,6 +10,11 @@ namespace Wincent
         /// <summary>
         /// Gets or sets the timeout for Windows and PowerShell operations.
         /// </summary>
+        /// <remarks>
+        /// Native COM operations run on background STA threads. When a timeout is reached,
+        /// a <see cref="TimeoutException"/> is thrown, but the background thread may continue
+        /// executing. Successive timeouts may accumulate orphaned STA threads.
+        /// </remarks>
         public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(10);
 
         /// <summary>

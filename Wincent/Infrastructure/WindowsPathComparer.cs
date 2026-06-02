@@ -15,17 +15,23 @@ namespace Wincent
             if (path == null)
                 return null;
 
-            string normalized = path.Replace('/', '\\').TrimEnd('\\');
+            string normalized = path.Replace('/', '\\');
             try
             {
-                normalized = Path.GetFullPath(normalized).TrimEnd('\\');
+                normalized = Path.GetFullPath(normalized);
+                string root = Path.GetPathRoot(normalized);
+                if (!string.IsNullOrEmpty(root) &&
+                    string.Equals(normalized, root, StringComparison.OrdinalIgnoreCase))
+                {
+                    return normalized;
+                }
             }
             catch (Exception)
             {
                 // Invalid paths still participate in lightweight Windows-style comparison.
             }
 
-            return normalized;
+            return normalized.TrimEnd('\\');
         }
     }
 }
