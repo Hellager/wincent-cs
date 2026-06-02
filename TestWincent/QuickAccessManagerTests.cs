@@ -956,6 +956,89 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void SetVisible_DefaultOptions_DoesNotRefreshExplorer()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.FrequentFolders, false));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.SetVisible(QuickAccess.FrequentFolders, false);
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.FrequentFolders, false), Times.Once);
+            _explorerRefresher.Verify(r => r.Refresh(It.IsAny<TimeSpan>()), Times.Never);
+        }
+
+        [TestMethod]
+        public void SetVisible_WithRefresh_RefreshesExplorer()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.RecentFiles, true));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.SetVisible(
+                QuickAccess.RecentFiles,
+                true,
+                new VisibilityOptions { RefreshExplorer = true });
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.RecentFiles, true), Times.Once);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
+        public void SetVisible_WithRefresh_NativeRefreshFailureUsesPowerShellFallback()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.RecentFiles, false));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.SetVisible(
+                QuickAccess.RecentFiles,
+                false,
+                new VisibilityOptions { RefreshExplorer = true });
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.RecentFiles, false), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void SetVisible_WithRefresh_AllRefreshPathsFail_ThrowsPowerShellException()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.RecentFiles, false));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            Assert.ThrowsException<PowerShellExecutionException>(() =>
+                _manager.SetVisible(
+                    QuickAccess.RecentFiles,
+                    false,
+                    new VisibilityOptions { RefreshExplorer = true }));
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.RecentFiles, false), Times.Once);
+        }
+
+        [TestMethod]
+        public void SetVisible_NullOptions_ThrowsBeforeWrite()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            Assert.ThrowsException<ArgumentNullException>(() =>
+                _manager.SetVisible(QuickAccess.RecentFiles, true, null));
+        }
+
+        [TestMethod]
         public void ShowSection_SetsVisibleTrue()
         {
             var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
@@ -969,6 +1052,21 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void ShowSection_WithOptions_SetsVisibleTrueAndRefreshes()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.All, true));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.ShowSection(QuickAccess.All, new VisibilityOptions { RefreshExplorer = true });
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.All, true), Times.Once);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
         public void HideSection_SetsVisibleFalse()
         {
             var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
@@ -979,6 +1077,21 @@ namespace TestWincent
             _manager.HideSection(QuickAccess.All);
 
             visibility.Verify(v => v.SetVisible(QuickAccess.All, false), Times.Once);
+        }
+
+        [TestMethod]
+        public void HideSection_WithOptions_SetsVisibleFalseAndRefreshes()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.All, false));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.HideSection(QuickAccess.All, new VisibilityOptions { RefreshExplorer = true });
+
+            visibility.Verify(v => v.SetVisible(QuickAccess.All, false), Times.Once);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
         }
 
         [TestMethod]
@@ -1067,6 +1180,7 @@ namespace TestWincent
                 "Wincent.RemoveOptions",
                 "Wincent.RetryPolicy",
                 "Wincent.UnsupportedQuickAccessOperationException",
+                "Wincent.VisibilityOptions",
                 "Wincent.WincentException"
             };
 

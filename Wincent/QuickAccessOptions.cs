@@ -74,6 +74,21 @@ namespace Wincent
     }
 
     /// <summary>
+    /// Configures visibility operations.
+    /// </summary>
+    public sealed class VisibilityOptions
+    {
+        /// <summary>
+        /// Gets or sets whether Explorer windows should be refreshed after changing visibility.
+        /// </summary>
+        /// <remarks>
+        /// Visibility changes write Explorer registry settings. Already-open Explorer windows may not reflect those
+        /// settings until Explorer is refreshed or the Folder Options UI applies the change.
+        /// </remarks>
+        public bool RefreshExplorer { get; set; }
+    }
+
+    /// <summary>
     /// Configures batch operations.
     /// </summary>
     public sealed class BatchOptions

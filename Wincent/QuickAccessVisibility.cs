@@ -22,6 +22,8 @@ namespace Wincent
 
     internal sealed class RegistryQuickAccessVisibility : IQuickAccessVisibility
     {
+        // Explorer stores the Quick Access visibility toggles under the current user's Explorer key.
+        // ShowFrequent controls automatically shown, unpinned frequent folders; pinned folders are separate.
         private const string ShowRecentValueName = "ShowRecent";
         private const string ShowFrequentValueName = "ShowFrequent";
 

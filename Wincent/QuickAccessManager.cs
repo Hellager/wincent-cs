@@ -850,8 +850,11 @@ namespace Wincent
         /// <returns><see langword="true"/> when the requested section is visible.</returns>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
         /// <remarks>
-        /// This method reads the current Windows user's Explorer registry settings. Missing registry values are treated
-        /// as visible.
+        /// This method reads the current Windows user's Explorer registry settings. <see cref="QuickAccess.RecentFiles"/>
+        /// maps to Explorer's <c>ShowRecent</c> value, and <see cref="QuickAccess.FrequentFolders"/> maps to
+        /// <c>ShowFrequent</c>. Missing registry values are treated as visible. Explorer's frequent-folder visibility
+        /// setting only controls automatically shown, unpinned frequent folders; pinned Quick Access folders remain
+        /// controlled by Explorer's pin state.
         /// </remarks>
         /// <seealso cref="SetVisible(QuickAccess, bool)"/>
         public bool IsVisible(QuickAccess target)
@@ -866,13 +869,41 @@ namespace Wincent
         /// <param name="visible">Whether the section should be visible.</param>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
         /// <remarks>
-        /// This method writes the current Windows user's Explorer registry settings. It does not refresh Explorer
-        /// windows or simulate the Folder Options UI, so already-open windows may not immediately reflect the change.
+        /// This method writes the current Windows user's Explorer registry settings and does not refresh Explorer
+        /// windows. Use <see cref="SetVisible(QuickAccess, bool, VisibilityOptions)"/> with
+        /// <see cref="VisibilityOptions.RefreshExplorer"/> to request a Shell refresh. For
+        /// <see cref="QuickAccess.FrequentFolders"/>, this setting only affects automatically shown, unpinned frequent
+        /// folders; pinned Quick Access folders are not hidden by <c>ShowFrequent</c>.
         /// </remarks>
         /// <seealso cref="IsVisible(QuickAccess)"/>
         public void SetVisible(QuickAccess target, bool visible)
         {
+            SetVisible(target, visible, new VisibilityOptions());
+        }
+
+        /// <summary>
+        /// Sets whether a Quick Access section is visible in Explorer.
+        /// </summary>
+        /// <param name="target">The section to update.</param>
+        /// <param name="visible">Whether the section should be visible.</param>
+        /// <param name="options">The visibility options.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <remarks>
+        /// This method writes the current Windows user's Explorer registry settings. When
+        /// <see cref="VisibilityOptions.RefreshExplorer"/> is enabled, Explorer windows are refreshed after the registry
+        /// write. If the refresh fails after both native Shell refresh and PowerShell fallback, the refresh failure is
+        /// propagated and the registry write is not rolled back.
+        /// </remarks>
+        /// <seealso cref="IsVisible(QuickAccess)"/>
+        public void SetVisible(QuickAccess target, bool visible, VisibilityOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
             _visibility.SetVisible(target, visible);
+            if (options.RefreshExplorer)
+                RefreshExplorer();
         }
 
         /// <summary>
@@ -881,13 +912,29 @@ namespace Wincent
         /// <param name="target">The section to show.</param>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
         /// <remarks>
-        /// This method writes the current Windows user's Explorer registry settings. It does not refresh Explorer
-        /// windows or simulate the Folder Options UI.
+        /// This method writes the current Windows user's Explorer registry settings and does not refresh Explorer
+        /// windows. Use <see cref="ShowSection(QuickAccess, VisibilityOptions)"/> to request a Shell refresh.
         /// </remarks>
         /// <seealso cref="SetVisible(QuickAccess, bool)"/>
         public void ShowSection(QuickAccess target)
         {
-            SetVisible(target, true);
+            ShowSection(target, new VisibilityOptions());
+        }
+
+        /// <summary>
+        /// Shows a Quick Access section in Explorer.
+        /// </summary>
+        /// <param name="target">The section to show.</param>
+        /// <param name="options">The visibility options.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <remarks>
+        /// This is a convenience wrapper for <see cref="SetVisible(QuickAccess, bool, VisibilityOptions)"/>.
+        /// </remarks>
+        /// <seealso cref="SetVisible(QuickAccess, bool, VisibilityOptions)"/>
+        public void ShowSection(QuickAccess target, VisibilityOptions options)
+        {
+            SetVisible(target, true, options);
         }
 
         /// <summary>
@@ -896,13 +943,31 @@ namespace Wincent
         /// <param name="target">The section to hide.</param>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
         /// <remarks>
-        /// This method writes the current Windows user's Explorer registry settings. It does not refresh Explorer
-        /// windows or simulate the Folder Options UI.
+        /// This method writes the current Windows user's Explorer registry settings and does not refresh Explorer
+        /// windows. Use <see cref="HideSection(QuickAccess, VisibilityOptions)"/> to request a Shell refresh. For
+        /// <see cref="QuickAccess.FrequentFolders"/>, pinned Quick Access folders remain visible because Explorer
+        /// treats pinned folders separately from automatically shown frequent folders.
         /// </remarks>
         /// <seealso cref="SetVisible(QuickAccess, bool)"/>
         public void HideSection(QuickAccess target)
         {
-            SetVisible(target, false);
+            HideSection(target, new VisibilityOptions());
+        }
+
+        /// <summary>
+        /// Hides a Quick Access section in Explorer.
+        /// </summary>
+        /// <param name="target">The section to hide.</param>
+        /// <param name="options">The visibility options.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <remarks>
+        /// This is a convenience wrapper for <see cref="SetVisible(QuickAccess, bool, VisibilityOptions)"/>.
+        /// </remarks>
+        /// <seealso cref="SetVisible(QuickAccess, bool, VisibilityOptions)"/>
+        public void HideSection(QuickAccess target, VisibilityOptions options)
+        {
+            SetVisible(target, false, options);
         }
 
         /// <summary>
