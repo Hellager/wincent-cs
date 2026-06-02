@@ -9,6 +9,8 @@ namespace TestWincent
     [TestClass]
     public class DestListParserTests
     {
+        public TestContext TestContext { get; set; }
+
         [TestMethod]
         public void ParseBytes_RejectsWrongMagic()
         {
@@ -67,18 +69,47 @@ namespace TestWincent
         [Ignore("Integration test; reads the current user's real Recent Files automaticDestinations file.")]
         public void Integration_ParseRecentFilesMetadata()
         {
-            var parsed = DestListMetadataParser.ParseFile(DestListMetadataParser.RecentFilesDestPath());
+            string path = DestListMetadataParser.RecentFilesDestPath();
+            var parsed = DestListMetadataParser.ParseFile(path);
 
             Assert.IsNotNull(parsed.DestList);
+            OutputDestList("Recent Files", path, parsed);
         }
 
         [TestMethod]
         [Ignore("Integration test; reads the current user's real Frequent Folders automaticDestinations file.")]
         public void Integration_ParseFrequentFoldersMetadata()
         {
-            var parsed = DestListMetadataParser.ParseFile(DestListMetadataParser.FrequentFoldersDestPath());
+            string path = DestListMetadataParser.FrequentFoldersDestPath();
+            var parsed = DestListMetadataParser.ParseFile(path);
 
             Assert.IsNotNull(parsed.DestList);
+            OutputDestList("Frequent Folders", path, parsed);
+        }
+
+        private void OutputDestList(string label, string path, AutomaticDestinations parsed)
+        {
+            var dest = parsed.DestList;
+            var cfb = parsed.CfbInfo;
+
+            TestContext.WriteLine("");
+            TestContext.WriteLine($"=== {label} ===");
+            TestContext.WriteLine($"  File          : {path}");
+            TestContext.WriteLine($"  CFB sector    : {cfb.SectorSize} / mini {cfb.MiniSectorSize} / cutoff {cfb.MiniCutoffSize}");
+            TestContext.WriteLine($"  Dir entries   : {cfb.DirectoryEntries.Count}");
+            TestContext.WriteLine($"  Version       : {dest.Version}");
+            TestContext.WriteLine($"  Entries       : {dest.DeclaredEntryCount} declared ({dest.Entries.Count} parsed)");
+            TestContext.WriteLine($"  Pinned        : {dest.PinnedEntryCount}");
+            TestContext.WriteLine($"  Last rev      : {dest.LastRevisionNumber}");
+
+            for (int i = 0; i < dest.Entries.Count; i++)
+            {
+                var e = dest.Entries[i];
+                TestContext.WriteLine(
+                    $"  [{i}] {(e.IsPinned ? "PIN " : "    ")}{e.Path,-60} rank={e.RecentRank,4} access={e.AccessCount,4} score={e.Score:F2} pinOrder={e.PinOrder?.ToString() ?? "-"} time={e.LastInteractionTime:yyyy-MM-dd HH:mm}");
+            }
+
+            TestContext.WriteLine($"=== {dest.Entries.Count} entries total ===");
         }
 
         [TestMethod]
