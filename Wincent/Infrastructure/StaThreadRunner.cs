@@ -6,7 +6,11 @@ namespace Wincent
 {
     internal static class StaThreadRunner
     {
-        public static void Run(Action action, TimeSpan timeout, INativeMethods nativeMethods = null)
+        public static void Run(
+            Action action,
+            TimeSpan timeout,
+            INativeMethods nativeMethods = null,
+            bool disableOle1Dde = false)
         {
             if (action == null)
                 throw new ArgumentNullException(nameof(action));
@@ -18,10 +22,15 @@ namespace Wincent
                     return true;
                 },
                 timeout,
-                nativeMethods);
+                nativeMethods,
+                disableOle1Dde);
         }
 
-        public static T Run<T>(Func<T> action, TimeSpan timeout, INativeMethods nativeMethods = null)
+        public static T Run<T>(
+            Func<T> action,
+            TimeSpan timeout,
+            INativeMethods nativeMethods = null,
+            bool disableOle1Dde = false)
         {
             if (action == null)
                 throw new ArgumentNullException(nameof(action));
@@ -36,7 +45,7 @@ namespace Wincent
             {
                 try
                 {
-                    using (ComGuard.InitializeSta(nativeMethods))
+                    using (ComGuard.InitializeSta(nativeMethods, disableOle1Dde))
                     {
                         result = action();
                     }

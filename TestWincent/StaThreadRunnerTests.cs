@@ -58,6 +58,27 @@ namespace TestWincent
                     nativeMethods.Object));
         }
 
+        [TestMethod]
+        public void Run_DisableOle1Dde_PassesFlagToComInitialization()
+        {
+            uint? coInit = null;
+            var nativeMethods = new Mock<INativeMethods>(MockBehavior.Strict);
+            nativeMethods.Setup(n => n.CoInitializeEx(IntPtr.Zero, It.IsAny<uint>()))
+                .Callback<IntPtr, uint>((reserved, flags) => coInit = flags)
+                .Returns(0);
+            nativeMethods.Setup(n => n.CoUninitialize());
+
+            StaThreadRunner.Run(
+                () => { },
+                TimeSpan.FromSeconds(1),
+                nativeMethods.Object,
+                disableOle1Dde: true);
+
+            Assert.AreEqual(
+                (uint)(NativeMethods.COINIT_APARTMENTTHREADED | NativeMethods.COINIT_DISABLE_OLE1DDE),
+                coInit.Value);
+        }
+
         private static Mock<INativeMethods> CreateNativeMethods()
         {
             var nativeMethods = new Mock<INativeMethods>(MockBehavior.Strict);

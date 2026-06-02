@@ -1125,29 +1125,34 @@ namespace Wincent
 
         private void AddFileToRecentDocs(string filePath)
         {
-            IntPtr pathPtr = IntPtr.Zero;
-
-            try
-            {
-                using (ComGuard.InitializeSta(_nativeMethods, disableOle1Dde: true))
+            StaThreadRunner.Run(
+                () =>
                 {
-                    pathPtr = Marshal.StringToHGlobalUni(filePath);
-                    _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, pathPtr);
-                }
-            }
-            finally
-            {
-                if (pathPtr != IntPtr.Zero)
-                    Marshal.FreeHGlobal(pathPtr);
-            }
+                    IntPtr pathPtr = IntPtr.Zero;
+
+                    try
+                    {
+                        pathPtr = Marshal.StringToHGlobalUni(filePath);
+                        _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, pathPtr);
+                    }
+                    finally
+                    {
+                        if (pathPtr != IntPtr.Zero)
+                            Marshal.FreeHGlobal(pathPtr);
+                    }
+                },
+                _timeout,
+                _nativeMethods,
+                disableOle1Dde: true);
         }
 
         private void ClearRecentFiles()
         {
-            using (ComGuard.InitializeSta(_nativeMethods, disableOle1Dde: true))
-            {
-                _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, IntPtr.Zero);
-            }
+            StaThreadRunner.Run(
+                () => _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, IntPtr.Zero),
+                _timeout,
+                _nativeMethods,
+                disableOle1Dde: true);
         }
 
         private void ClearFrequentFolders(bool removePinnedFolders)

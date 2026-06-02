@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Wincent;
 
 namespace TestWincent
@@ -235,11 +236,19 @@ namespace TestWincent
         [TestMethod]
         public void AddItem_RecentFile_UsesNativeRecentDocs()
         {
+            ApartmentState? recentDocsApartment = null;
+            _nativeMethods.Setup(n => n.SHAddToRecentDocs(It.IsAny<uint>(), It.IsAny<IntPtr>()))
+                .Callback<uint, IntPtr>((flags, path) => recentDocsApartment = Thread.CurrentThread.GetApartmentState());
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
                 .ReturnsAsync(new List<string>());
 
             _manager.AddItem(@"C:\test.txt", QuickAccess.RecentFiles);
 
+            Assert.AreEqual(ApartmentState.STA, recentDocsApartment.Value);
+            _nativeMethods.Verify(n => n.CoInitializeEx(
+                IntPtr.Zero,
+                (uint)(NativeMethods.COINIT_APARTMENTTHREADED | NativeMethods.COINIT_DISABLE_OLE1DDE)),
+                Times.Once);
             _nativeMethods.Verify(n => n.SHAddToRecentDocs(It.IsAny<uint>(), It.IsAny<IntPtr>()), Times.Once);
             _executor.Verify(e => e.ClearCache(), Times.Once);
         }
@@ -517,8 +526,13 @@ namespace TestWincent
         [TestMethod]
         public void ClearItems_RecentFiles_UsesNativeClear()
         {
+            ApartmentState? recentDocsApartment = null;
+            _nativeMethods.Setup(n => n.SHAddToRecentDocs(It.IsAny<uint>(), IntPtr.Zero))
+                .Callback<uint, IntPtr>((flags, path) => recentDocsApartment = Thread.CurrentThread.GetApartmentState());
+
             _manager.ClearItems(QuickAccess.RecentFiles);
 
+            Assert.AreEqual(ApartmentState.STA, recentDocsApartment.Value);
             _nativeMethods.Verify(n => n.CoInitializeEx(
                 IntPtr.Zero,
                 (uint)(NativeMethods.COINIT_APARTMENTTHREADED | NativeMethods.COINIT_DISABLE_OLE1DDE)),
