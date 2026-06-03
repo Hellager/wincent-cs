@@ -338,6 +338,21 @@ namespace TestWincent
             StringAssert.Contains(script, "if ($isWin11)");
         }
 
+        [TestMethod]
+        public void UnpinStrategy_VerifiesRemovalAndPinsUnpinnedFrequentFoldersBeforeUnpin()
+        {
+            var strategy = new UnpinFromFrequentFolderStrategy();
+            const string testPath = @"C:\test";
+
+            var script = strategy.GenerateScript(testPath);
+
+            StringAssert.Contains(script, "$target.InvokeVerb('unpinfromhome')");
+            StringAssert.Contains(script, $@"$shellApplication.Namespace('{testPath}').Self.InvokeVerb('pintohome')");
+            StringAssert.Contains(script, "Start-Sleep -Milliseconds 1000");
+            StringAssert.Contains(script, "if ($null -eq $target) { return }");
+            StringAssert.Contains(script, "Failed to remove frequent folder");
+        }
+
         #endregion
 
         #region File Generation Tests

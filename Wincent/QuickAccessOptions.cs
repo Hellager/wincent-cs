@@ -61,6 +61,12 @@ namespace Wincent
         /// <summary>
         /// Gets or sets whether pinned folders should also be removed when clearing frequent folders.
         /// </summary>
+        /// <remarks>
+        /// Clearing frequent folders deletes Explorer's Frequent Folders backing file. On current Windows builds,
+        /// Explorer rebuild can reset folder pins to Desktop, Downloads, Documents, and Pictures, and can remove
+        /// user-pinned folders even when this option is <see langword="false"/>. This option also invokes Explorer's
+        /// unpin verb for visible pinned folders.
+        /// </remarks>
         public bool RemovePinnedFolders { get; set; }
 
         /// <summary>

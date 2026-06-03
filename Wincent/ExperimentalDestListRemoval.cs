@@ -24,6 +24,15 @@ namespace Wincent
         /// <remarks>
         /// This method deletes Shell-maintained files for the current Windows user. It is experimental, best-effort,
         /// non-transactional, and may temporarily affect Explorer Quick Access state.
+        /// Deleting the Frequent Folders backing file
+        /// (<c>f01b4d95cf55d32a.automaticDestinations-ms</c>) makes Explorer rebuild that file and can reset Quick
+        /// Access folder pins to the system defaults: Desktop, Downloads, Documents, and Pictures. User-pinned folders
+        /// and automatically shown frequent folders can both be removed by that rebuild. Existing folder shortcuts in
+        /// the Windows Recent folder are not removed by Explorer during this rebuild; frequent folders commonly have
+        /// matching shortcuts there, while user-pinned folders may not.
+        /// Deleting the Recent Files backing file (<c>5f7b5f1e01b83767.automaticDestinations-ms</c>) makes Explorer
+        /// rebuild recent files from file shortcuts in the Windows Recent folder. Files that no longer appeared in
+        /// Recent Files can reappear after rebuild when their shortcuts still exist there.
         /// </remarks>
         public static ExperimentalRemoveReport RemoveEntryPathsByRebuild(
             AutomaticDestinationsKind kind,
@@ -174,6 +183,11 @@ namespace Wincent
             RebuildWaitResult rebuild;
             try
             {
+                // Explorer rebuilds Recent Files from file shortcuts under the Windows Recent folder. Frequent
+                // Folders rebuilds are more destructive: deleting the backing file can reset folder pins to the
+                // default Desktop/Downloads/Documents/Pictures set, while leaving existing Recent folder shortcuts in
+                // place. Delete matching shortcuts here because this helper is path-removal oriented and should avoid
+                // those shortcuts feeding the rebuilt destination file back to the requested paths.
                 var deletedLinks = DeleteMatchingRecentLinks(recentFolder, requestedPaths);
                 deletedShortcutPaths = deletedLinks.Select(link => link.ShortcutPath).ToList().AsReadOnly();
                 missingShortcutTargetPaths = requestedPaths

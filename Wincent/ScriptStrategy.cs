@@ -187,7 +187,23 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
-                $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome')                
+                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
+                if ($null -eq $target) {{ throw 'Target path not found in Frequent Folders namespace: {parameter}' }}
+
+                $target.InvokeVerb('unpinfromhome');
+                Start-Sleep -Milliseconds 1000;
+
+                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
+                if ($null -eq $target) {{ return }}
+
+                $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome');
+                Start-Sleep -Milliseconds 1000;
+
+                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
+                if ($null -eq $target) {{ return }}
 
                 $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match 'Windows 11'
                 if ($isWin11)
@@ -196,10 +212,14 @@ namespace Wincent
                 }}
                 else
                 {{
-                    $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                    $target = $folders | where {{ $_.Path -eq '{parameter}' }};
                     $target.InvokeVerb('unpinfromhome');
                 }}
+
+                Start-Sleep -Milliseconds 1000;
+
+                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
+                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
+                if ($null -ne $target) {{ throw 'Failed to remove frequent folder: {parameter}' }}
             ";
         }
     }
