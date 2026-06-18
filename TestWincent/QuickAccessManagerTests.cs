@@ -696,6 +696,13 @@ namespace TestWincent
         [TestMethod]
         public void ClearItems_FrequentFoldersPinnedCleanup_UsesPinnedFoldersTimeout()
         {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(3)))
+                .Returns(new List<string> { @"C:\Pinned" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(3)));
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
+
             _manager.ClearItems(
                 QuickAccess.FrequentFolders,
                 new ClearOptions
@@ -704,21 +711,27 @@ namespace TestWincent
                     PinnedFoldersTimeout = TimeSpan.FromSeconds(3)
                 });
 
-            _executor.Verify(
-                e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 3),
-                Times.Once);
+            nativeQuery.Verify(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(3)), Times.Once);
+            _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(3)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, It.IsAny<int>()), Times.Never);
         }
 
         [TestMethod]
         public void ClearItems_FrequentFoldersPinnedCleanup_DefaultsToManagerTimeout()
         {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\Pinned" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(10)));
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
+
             _manager.ClearItems(
                 QuickAccess.FrequentFolders,
                 new ClearOptions { RemovePinnedFolders = true });
 
-            _executor.Verify(
-                e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 10),
-                Times.Once);
+            nativeQuery.Verify(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)), Times.Once);
+            _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(10)), Times.Once);
         }
 
         [TestMethod]
@@ -803,8 +816,13 @@ namespace TestWincent
         [TestMethod]
         public void ClearItems_FrequentFoldersPinnedCleanupFailure_ReportsFrequentProgress()
         {
-            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 10))
-                .Throws(CreatePowerShellException(PowerShellOperation.ClearPinnedFolders, PowerShellErrorKind.ProcessFailed, "unpin failed"));
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\Pinned" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("unpin failed"));
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
 
             try
             {
@@ -815,14 +833,20 @@ namespace TestWincent
             {
                 Assert.IsFalse(ex.RecentFilesCleared);
                 Assert.IsTrue(ex.FrequentFoldersCleared);
+                Assert.IsInstanceOfType(ex.InnerException, typeof(InvalidOperationException));
             }
         }
 
         [TestMethod]
         public void ClearItems_AllFrequentPartialFailure_MergesProgressFlags()
         {
-            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 10))
-                .Throws(CreatePowerShellException(PowerShellOperation.ClearPinnedFolders, PowerShellErrorKind.ProcessFailed, "unpin failed"));
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\Pinned" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("unpin failed"));
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
 
             try
             {
@@ -834,6 +858,24 @@ namespace TestWincent
                 Assert.IsTrue(ex.RecentFilesCleared);
                 Assert.IsTrue(ex.FrequentFoldersCleared);
             }
+        }
+
+        [TestMethod]
+        public void ClearItems_FrequentFoldersPinnedCleanup_IgnoresMissingPinnedFoldersAndContinues()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\Missing", @"C:\Pinned" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Missing", TimeSpan.FromSeconds(10)))
+                .Throws(new QuickAccessItemNotFoundException(@"C:\Missing", QuickAccess.FrequentFolders));
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(10)));
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
+
+            _manager.ClearItems(QuickAccess.FrequentFolders, new ClearOptions { RemovePinnedFolders = true });
+
+            _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Missing", TimeSpan.FromSeconds(10)), Times.Once);
+            _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(10)), Times.Once);
         }
 
         [TestMethod]
@@ -1519,6 +1561,19 @@ namespace TestWincent
                 _dataFiles.Object,
                 RetryPolicy.Standard,
                 nativeQuery);
+        }
+
+        private QuickAccessManager CreateManager(IQuickAccessNativeQuery nativeQuery, IQuickAccessNativeMutation nativeMutation)
+        {
+            return new QuickAccessManager(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object,
+                RetryPolicy.Standard,
+                nativeQuery,
+                nativeMutation);
         }
 
         private QuickAccessManager CreateManager(IQuickAccessLockFactory lockFactory)

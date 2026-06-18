@@ -1555,6 +1555,9 @@ namespace Wincent
         private void ClearFrequentFolders(bool removePinnedFolders, TimeSpan pinnedFoldersTimeout)
         {
             var jumpListFile = _dataFiles.FrequentFoldersPath;
+            IReadOnlyList<string> pinnedSnapshot = removePinnedFolders
+                ? _nativeQuery.GetItems(QuickAccess.FrequentFolders, pinnedFoldersTimeout)
+                : Array.Empty<string>();
 
             if (_fileSystem.FileExists(jumpListFile))
                 _fileSystem.DeleteFile(jumpListFile);
@@ -1563,17 +1566,35 @@ namespace Wincent
             {
                 try
                 {
-                    ExecuteMutationScript(
-                        PSScript.EmptyPinnedFolders,
-                        null,
-                        PowerShellOperation.ClearPinnedFolders,
-                        pinnedFoldersTimeout);
+                    ClearPinnedFoldersFromSnapshot(pinnedSnapshot, pinnedFoldersTimeout);
                 }
                 catch (Exception ex)
                 {
                     throw new PartialClearException(false, true, ex);
                 }
             }
+        }
+
+        private void ClearPinnedFoldersFromSnapshot(IReadOnlyList<string> pinnedSnapshot, TimeSpan timeout)
+        {
+            Exception firstError = null;
+            foreach (string path in pinnedSnapshot)
+            {
+                try
+                {
+                    _nativeMutation.UnpinFrequentFolder(path, timeout);
+                }
+                catch (QuickAccessItemNotFoundException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    firstError = firstError ?? ex;
+                }
+            }
+
+            if (firstError != null)
+                throw firstError;
         }
 
         private void TryRefreshExplorer(bool shouldRefresh)
