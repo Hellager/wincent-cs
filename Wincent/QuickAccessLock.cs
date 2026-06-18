@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace Wincent
 {
@@ -126,14 +127,15 @@ namespace Wincent
     /// </summary>
     /// <remarks>
     /// This object affects the current Windows user's Quick Access backing files while it is alive. Manage the lock
-    /// with <see langword="using"/> or <see cref="Dispose"/>. The object does not declare thread safety; concurrent
-    /// calls to <see cref="Unlock()"/> and <see cref="Dispose"/> are not recommended.
+    /// with <see langword="using"/> or <see cref="Dispose"/>. Releasing the lock is idempotent for
+    /// <see cref="Dispose"/> and guarded against double handle disposal, but the object does not provide a stable
+    /// multi-threaded unlock report for concurrent <see cref="Unlock()"/> calls.
     /// </remarks>
     public sealed class QuickAccessLock : IDisposable
     {
         private readonly IReadOnlyList<IQuickAccessBackingFileHandle> _handles;
         private readonly IRecentLinkFileSystem _fileSystem;
-        private bool _disposed;
+        private int _disposed;
 
         internal QuickAccessLock(
             QuickAccessLockTarget target,
@@ -197,7 +199,8 @@ namespace Wincent
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
 
-            ThrowIfDisposed();
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                throw new ObjectDisposedException(nameof(QuickAccessLock));
 
             try
             {
@@ -234,7 +237,6 @@ namespace Wincent
             finally
             {
                 DisposeHandles();
-                _disposed = true;
             }
         }
 
@@ -243,16 +245,15 @@ namespace Wincent
         /// </summary>
         public void Dispose()
         {
-            if (_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
 
             DisposeHandles();
-            _disposed = true;
         }
 
         private void ThrowIfDisposed()
         {
-            if (_disposed)
+            if (Volatile.Read(ref _disposed) != 0)
                 throw new ObjectDisposedException(nameof(QuickAccessLock));
         }
 

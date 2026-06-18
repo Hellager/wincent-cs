@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Wincent;
 
 namespace TestWincent
@@ -181,6 +183,22 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void Dispose_CalledConcurrently_DisposesHandlesOnce()
+        {
+            var handle = new StubHandle();
+            var quickAccessLock = new QuickAccessLock(
+                QuickAccessLockTarget.RecentFiles,
+                @"C:\Recent",
+                Array.Empty<string>(),
+                new[] { handle },
+                new StubRecentLinkFileSystem(Array.Empty<string>()));
+
+            Parallel.For(0, 64, _ => quickAccessLock.Dispose());
+
+            Assert.AreEqual(1, handle.DisposeCount);
+        }
+
+        [TestMethod]
         public void Unlock_WhenCurrentSnapshotEnumerationFails_DisposesHandles()
         {
             var handle = new StubHandle();
@@ -329,11 +347,15 @@ namespace TestWincent
 
         private sealed class StubHandle : IQuickAccessBackingFileHandle
         {
-            public bool IsDisposed { get; private set; }
+            private int _disposeCount;
+
+            public bool IsDisposed => DisposeCount != 0;
+
+            public int DisposeCount => Volatile.Read(ref _disposeCount);
 
             public void Dispose()
             {
-                IsDisposed = true;
+                Interlocked.Increment(ref _disposeCount);
             }
         }
     }
