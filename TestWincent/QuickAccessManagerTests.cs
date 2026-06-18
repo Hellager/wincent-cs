@@ -924,19 +924,41 @@ namespace TestWincent
         [TestMethod]
         public void ClearItems_AllPartialFailure_ThrowsPartialClearException()
         {
+            var source = new Win32Exception(1);
             _nativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>()))
-                .Throws(new Win32Exception(1));
+                .Throws(source);
 
-            try
-            {
-                _manager.ClearItems(QuickAccess.All);
-                Assert.Fail("Expected PartialClearException.");
-            }
-            catch (PartialClearException ex)
-            {
-                Assert.IsFalse(ex.RecentFilesCleared);
-                Assert.IsTrue(ex.FrequentFoldersCleared);
-            }
+            var ex = Assert.ThrowsException<PartialClearException>(() =>
+                _manager.ClearItems(QuickAccess.All));
+
+            Assert.IsFalse(ex.RecentFilesCleared);
+            Assert.IsTrue(ex.FrequentFoldersCleared);
+            Assert.IsTrue(ex.HasPartialProgress);
+            Assert.IsFalse(ex.IsCompleteFailure);
+            Assert.AreSame(ex.InnerException, ex.SourceException);
+            Assert.AreSame(source, ex.SourceException);
+            StringAssert.Contains(ex.Message, "recent_files_cleared: false");
+            StringAssert.Contains(ex.Message, "frequent_folders_cleared: true");
+        }
+
+        [TestMethod]
+        public void ClearItems_AllCompleteFailure_ReportsNoProgress()
+        {
+            var source = new Win32Exception(1);
+            _nativeMethods.Setup(n => n.CoInitializeEx(It.IsAny<IntPtr>(), It.IsAny<uint>()))
+                .Throws(source);
+            _fileSystem.Setup(f => f.FileExists(@"C:\frequent.automaticDestinations-ms")).Returns(true);
+            _fileSystem.Setup(f => f.DeleteFile(@"C:\frequent.automaticDestinations-ms"))
+                .Throws(new IOException("delete failed"));
+
+            var ex = Assert.ThrowsException<PartialClearException>(() =>
+                _manager.ClearItems(QuickAccess.All));
+
+            Assert.IsFalse(ex.RecentFilesCleared);
+            Assert.IsFalse(ex.FrequentFoldersCleared);
+            Assert.IsFalse(ex.HasPartialProgress);
+            Assert.IsTrue(ex.IsCompleteFailure);
+            Assert.AreSame(source, ex.SourceException);
         }
 
         [TestMethod]
@@ -950,17 +972,15 @@ namespace TestWincent
             _manager.Dispose();
             _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
 
-            try
-            {
-                _manager.ClearItems(QuickAccess.FrequentFolders, new ClearOptions { RemovePinnedFolders = true });
-                Assert.Fail("Expected PartialClearException.");
-            }
-            catch (PartialClearException ex)
-            {
-                Assert.IsFalse(ex.RecentFilesCleared);
-                Assert.IsTrue(ex.FrequentFoldersCleared);
-                Assert.IsInstanceOfType(ex.InnerException, typeof(InvalidOperationException));
-            }
+            var ex = Assert.ThrowsException<PartialClearException>(() =>
+                _manager.ClearItems(QuickAccess.FrequentFolders, new ClearOptions { RemovePinnedFolders = true }));
+
+            Assert.IsFalse(ex.RecentFilesCleared);
+            Assert.IsTrue(ex.FrequentFoldersCleared);
+            Assert.IsTrue(ex.HasPartialProgress);
+            Assert.IsFalse(ex.IsCompleteFailure);
+            Assert.AreSame(ex.InnerException, ex.SourceException);
+            Assert.IsInstanceOfType(ex.SourceException, typeof(InvalidOperationException));
         }
 
         [TestMethod]
@@ -974,16 +994,14 @@ namespace TestWincent
             _manager.Dispose();
             _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
 
-            try
-            {
-                _manager.ClearItems(QuickAccess.All, new ClearOptions { RemovePinnedFolders = true });
-                Assert.Fail("Expected PartialClearException.");
-            }
-            catch (PartialClearException ex)
-            {
-                Assert.IsTrue(ex.RecentFilesCleared);
-                Assert.IsTrue(ex.FrequentFoldersCleared);
-            }
+            var ex = Assert.ThrowsException<PartialClearException>(() =>
+                _manager.ClearItems(QuickAccess.All, new ClearOptions { RemovePinnedFolders = true }));
+
+            Assert.IsTrue(ex.RecentFilesCleared);
+            Assert.IsTrue(ex.FrequentFoldersCleared);
+            Assert.IsTrue(ex.HasPartialProgress);
+            Assert.IsFalse(ex.IsCompleteFailure);
+            Assert.AreSame(ex.InnerException, ex.SourceException);
         }
 
         [TestMethod]
@@ -1014,16 +1032,14 @@ namespace TestWincent
             _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
                 .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
 
-            try
-            {
-                _manager.ClearItems(QuickAccess.All, new ClearOptions { RefreshExplorer = true });
-                Assert.Fail("Expected PartialClearException.");
-            }
-            catch (PartialClearException ex)
-            {
-                Assert.IsFalse(ex.RecentFilesCleared);
-                Assert.IsTrue(ex.FrequentFoldersCleared);
-            }
+            var ex = Assert.ThrowsException<PartialClearException>(() =>
+                _manager.ClearItems(QuickAccess.All, new ClearOptions { RefreshExplorer = true }));
+
+            Assert.IsFalse(ex.RecentFilesCleared);
+            Assert.IsTrue(ex.FrequentFoldersCleared);
+            Assert.IsTrue(ex.HasPartialProgress);
+            Assert.IsFalse(ex.IsCompleteFailure);
+            Assert.AreSame(ex.InnerException, ex.SourceException);
         }
 
         [TestMethod]

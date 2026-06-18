@@ -228,10 +228,13 @@ namespace Wincent
         /// Initializes the exception.
         /// </summary>
         public PartialClearException(bool recentFilesCleared, bool frequentFoldersCleared, Exception innerException)
-            : base("Only part of Quick Access was cleared.", innerException)
+            : base(
+                  $"Quick Access clear partially succeeded (recent_files_cleared: {FormatBoolean(recentFilesCleared)}, frequent_folders_cleared: {FormatBoolean(frequentFoldersCleared)}).",
+                  innerException)
         {
             RecentFilesCleared = recentFilesCleared;
             FrequentFoldersCleared = frequentFoldersCleared;
+            SourceException = innerException;
         }
 
         /// <summary>
@@ -243,6 +246,26 @@ namespace Wincent
         /// Gets whether frequent folders were cleared.
         /// </summary>
         public bool FrequentFoldersCleared { get; }
+
+        /// <summary>
+        /// Gets the underlying error that prevented the full clear from completing.
+        /// </summary>
+        public Exception SourceException { get; }
+
+        /// <summary>
+        /// Gets whether any Quick Access section was cleared before the failure.
+        /// </summary>
+        public bool HasPartialProgress => RecentFilesCleared || FrequentFoldersCleared;
+
+        /// <summary>
+        /// Gets whether no Quick Access section was cleared before the failure.
+        /// </summary>
+        public bool IsCompleteFailure => !HasPartialProgress;
+
+        private static string FormatBoolean(bool value)
+        {
+            return value ? "true" : "false";
+        }
     }
 
     /// <summary>
