@@ -1172,6 +1172,60 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void RemoveItems_DeepCleanFailureAfterMutation_StillRefreshesExplorer()
+        {
+            var item = QuickAccessItem.RecentFile(@"C:\failing.txt");
+            var cleanupError = new IOException("delete failed");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { item.Path });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(item.Path, TimeSpan.FromSeconds(10)));
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(item.Path, TimeSpan.FromSeconds(10)))
+                .Throws(cleanupError);
+
+            var result = _manager.RemoveItems(
+                new[] { item },
+                new BatchOptions { RefreshExplorer = true },
+                new RemoveOptions { DeepCleanRecentLinks = true });
+
+            Assert.AreEqual(1, result.Total);
+            Assert.AreEqual(0, result.Succeeded.Count);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.AreSame(item, result.Failed[0].Item);
+            Assert.AreSame(cleanupError, result.Failed[0].Error);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ClearCache(), Times.Once);
+        }
+
+        [TestMethod]
+        public void RemoveItems_DeepCleanFailureAndRefreshFailure_DoesNotRecordDuplicateFailure()
+        {
+            var item = QuickAccessItem.RecentFile(@"C:\failing.txt");
+            var cleanupError = new IOException("delete failed");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { item.Path });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(item.Path, TimeSpan.FromSeconds(10)));
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(item.Path, TimeSpan.FromSeconds(10)))
+                .Throws(cleanupError);
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+
+            var result = _manager.RemoveItems(
+                new[] { item },
+                new BatchOptions { RefreshExplorer = true },
+                new RemoveOptions { DeepCleanRecentLinks = true });
+
+            Assert.AreEqual(1, result.Total);
+            Assert.AreEqual(0, result.Succeeded.Count);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.AreSame(item, result.Failed[0].Item);
+            Assert.AreSame(cleanupError, result.Failed[0].Error);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10), Times.Once);
+        }
+
+        [TestMethod]
         public void RemoveItems_DeepCleanDisabledDoesNotCallCleaner()
         {
             var item = QuickAccessItem.RecentFile(@"C:\test.txt");

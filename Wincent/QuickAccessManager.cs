@@ -652,6 +652,18 @@ namespace Wincent
         /// </remarks>
         public void RemoveItem(string path, QuickAccess target, RemoveOptions options)
         {
+            try
+            {
+                RemoveItemCore(path, target, options);
+            }
+            catch (ShellMutationSucceededException ex)
+            {
+                throw ex.InnerException;
+            }
+        }
+
+        private bool RemoveItemCore(string path, QuickAccess target, RemoveOptions options)
+        {
             if (path == null)
                 throw new ArgumentNullException(nameof(path));
             if (options == null)
@@ -691,7 +703,18 @@ namespace Wincent
                 if (options.RefreshExplorer)
                     RefreshExplorerAfterMutation(path, target);
                 if (options.DeepCleanRecentLinks)
-                    _recentLinksCleaner.DeleteForTarget(path, _timeout);
+                {
+                    try
+                    {
+                        _recentLinksCleaner.DeleteForTarget(path, _timeout);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new ShellMutationSucceededException(ex);
+                    }
+                }
+
+                return true;
             }
             finally
             {
@@ -821,6 +844,7 @@ namespace Wincent
             var succeeded = new List<QuickAccessItem>();
             var failed = new List<BatchFailure>();
             int refreshExplorerItemIndex = -1;
+            bool refreshExplorerWithoutAttribution = false;
             var perItemOptions = new RemoveOptions
             {
                 DeepCleanRecentLinks = removeOptions.DeepCleanRecentLinks,
@@ -834,7 +858,10 @@ namespace Wincent
 
                 try
                 {
-                    RemoveItem(item.Path, item.Target, perItemOptions);
+                    bool mutationSucceeded = RemoveItemCore(item.Path, item.Target, perItemOptions);
+                    if (!mutationSucceeded)
+                        continue;
+
                     succeeded.Add(item);
                     if (batchOptions.RefreshExplorer)
                         refreshExplorerItemIndex = SelectBatchRefreshItemIndex(
@@ -845,11 +872,20 @@ namespace Wincent
                 }
                 catch (Exception ex)
                 {
-                    failed.Add(new BatchFailure(item, ex));
+                    var mutationSucceeded = ex as ShellMutationSucceededException;
+                    if (mutationSucceeded != null)
+                        refreshExplorerWithoutAttribution = true;
+
+                    failed.Add(new BatchFailure(item, mutationSucceeded?.InnerException ?? ex));
                 }
             }
 
-            RecordBatchExplorerRefreshFailure(batchOptions.RefreshExplorer, succeeded, failed, refreshExplorerItemIndex);
+            RecordBatchExplorerRefreshFailure(
+                batchOptions.RefreshExplorer,
+                succeeded,
+                failed,
+                refreshExplorerItemIndex,
+                refreshExplorerWithoutAttribution);
 
             return new BatchResult(succeeded, failed);
         }
@@ -1335,10 +1371,28 @@ namespace Wincent
             bool shouldRefresh,
             List<QuickAccessItem> succeeded,
             List<BatchFailure> failed,
-            int refreshExplorerItemIndex)
+            int refreshExplorerItemIndex,
+            bool attemptedRefreshWithoutAttribution = false)
         {
-            if (!shouldRefresh || succeeded.Count == 0 || refreshExplorerItemIndex < 0)
+            if (!shouldRefresh)
                 return;
+
+            if (succeeded.Count == 0 || refreshExplorerItemIndex < 0)
+            {
+                if (attemptedRefreshWithoutAttribution)
+                {
+                    try
+                    {
+                        RefreshExplorer();
+                    }
+                    catch (Exception)
+                    {
+                        // The mutated item is already reported as failed by its post-mutation cleanup.
+                    }
+                }
+
+                return;
+            }
 
             try
             {
@@ -1358,6 +1412,14 @@ namespace Wincent
                         item.Target,
                         QuickAccessPostMutationStep.RefreshExplorer,
                         ex)));
+            }
+        }
+
+        private sealed class ShellMutationSucceededException : Exception
+        {
+            public ShellMutationSucceededException(Exception innerException)
+                : base(innerException?.Message, innerException)
+            {
             }
         }
 
