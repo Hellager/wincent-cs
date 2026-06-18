@@ -57,6 +57,7 @@
     <Compile Include="Infrastructure\WindowsRecentFolder.cs" />
     <Compile Include="RetryPolicy.cs" />
     <Compile Include="QuickAccessOptions.cs" />
+    <Compile Include="QuickAccessRestore.cs" />
     <Compile Include="QuickAccessBatch.cs" />
     <Compile Include="QuickAccessLockTypes.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

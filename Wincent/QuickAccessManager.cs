@@ -124,6 +124,7 @@ namespace Wincent
         private readonly IQuickAccessLockFactory _lockFactory;
         private readonly IQuickAccessVisibility _visibility;
         private readonly IDestListMetadataReader _destListReader;
+        private readonly IQuickAccessRestoreEngine _restoreEngine;
 
         /// <summary>
         /// Initializes a manager with default options.
@@ -161,7 +162,15 @@ namespace Wincent
                       new DefaultRecentLinkFileSystem(),
                       new NativeQuickAccessBackingFileHandleOpener()),
                   new RegistryQuickAccessVisibility(new CurrentUserExplorerVisibilityRegistry()),
-                  new DefaultDestListMetadataReader())
+                  new DefaultDestListMetadataReader(),
+                  new QuickAccessRestoreEngine(
+                      new QuickAccessDataFiles(),
+                      new WindowsRecentFolder(new DefaultNativeMethods()),
+                      new ShellLinkTargetResolver(new DefaultNativeMethods()),
+                      new DefaultRecentLinkFileSystem(),
+                      new DefaultFileSystemOperations(),
+                      new DefaultDestListMetadataReader(),
+                      new DefaultQuickAccessRestoreDelay()))
         {
         }
 
@@ -185,7 +194,8 @@ namespace Wincent
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
                   new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -209,7 +219,8 @@ namespace Wincent
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
                   new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -234,7 +245,8 @@ namespace Wincent
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
                   new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -260,7 +272,8 @@ namespace Wincent
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
                   new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -287,7 +300,8 @@ namespace Wincent
                   new NoOpRecentLinksCleaner(),
                   new NoOpQuickAccessLockFactory(),
                   new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -315,7 +329,8 @@ namespace Wincent
                   recentLinksCleaner,
                   new NoOpQuickAccessLockFactory(),
                   new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -344,7 +359,8 @@ namespace Wincent
                   recentLinksCleaner,
                   lockFactory,
                   new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -374,7 +390,8 @@ namespace Wincent
                   recentLinksCleaner,
                   lockFactory,
                   visibility,
-                  new NoOpDestListMetadataReader())
+                  new NoOpDestListMetadataReader(),
+                  new NoOpQuickAccessRestoreEngine())
         {
         }
 
@@ -392,6 +409,39 @@ namespace Wincent
             IQuickAccessLockFactory lockFactory,
             IQuickAccessVisibility visibility,
             IDestListMetadataReader destListReader)
+            : this(
+                  executor,
+                  timeout,
+                  fileSystem,
+                  nativeMethods,
+                  dataFiles,
+                  retryPolicy,
+                  nativeQuery,
+                  nativeMutation,
+                  explorerRefresher,
+                  recentLinksCleaner,
+                  lockFactory,
+                  visibility,
+                  destListReader,
+                  new NoOpQuickAccessRestoreEngine())
+        {
+        }
+
+        internal QuickAccessManager(
+            IScriptExecutor executor,
+            TimeSpan timeout,
+            IFileSystemOperations fileSystem,
+            INativeMethods nativeMethods,
+            IQuickAccessDataFiles dataFiles,
+            RetryPolicy retryPolicy,
+            IQuickAccessNativeQuery nativeQuery,
+            IQuickAccessNativeMutation nativeMutation,
+            IExplorerRefresher explorerRefresher,
+            IRecentLinksCleaner recentLinksCleaner,
+            IQuickAccessLockFactory lockFactory,
+            IQuickAccessVisibility visibility,
+            IDestListMetadataReader destListReader,
+            IQuickAccessRestoreEngine restoreEngine)
         {
             if (timeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
@@ -409,6 +459,7 @@ namespace Wincent
             _lockFactory = lockFactory ?? throw new ArgumentNullException(nameof(lockFactory));
             _visibility = visibility ?? throw new ArgumentNullException(nameof(visibility));
             _destListReader = destListReader ?? throw new ArgumentNullException(nameof(destListReader));
+            _restoreEngine = restoreEngine ?? throw new ArgumentNullException(nameof(restoreEngine));
         }
 
         /// <summary>
@@ -806,6 +857,88 @@ namespace Wincent
         }
 
         /// <summary>
+        /// Restores a Quick Access section to the system-default state.
+        /// </summary>
+        /// <param name="target">The section to restore.</param>
+        /// <returns>The restore report.</returns>
+        public RestoreDefaultsReport RestoreDefaults(QuickAccess target)
+        {
+            return RestoreDefaults(target, new RestoreDefaultsOptions());
+        }
+
+        /// <summary>
+        /// Restores a Quick Access section to the system-default state.
+        /// </summary>
+        /// <param name="target">The section to restore.</param>
+        /// <param name="options">The restore options.</param>
+        /// <returns>The restore report.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> or an option value is invalid.</exception>
+        public RestoreDefaultsReport RestoreDefaults(QuickAccess target, RestoreDefaultsOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
+            EnsureClearTarget(target);
+            options.Validate();
+            var report = _restoreEngine.RestoreDefaults(target, options, ClearRecentFiles, RefreshExplorer);
+            if (report.Success || report.RecentReport != null || report.FrequentReport != null)
+                _executor.ClearCache();
+
+            return report;
+        }
+
+        /// <summary>
+        /// Restores Recent Files to the system-default state.
+        /// </summary>
+        /// <returns>The restore report.</returns>
+        public RecentRestoreReport RestoreRecentFilesDefaults()
+        {
+            return RestoreRecentFilesDefaults(new RestoreDefaultsOptions());
+        }
+
+        /// <summary>
+        /// Restores Recent Files to the system-default state.
+        /// </summary>
+        /// <param name="options">The restore options.</param>
+        /// <returns>The restore report.</returns>
+        public RecentRestoreReport RestoreRecentFilesDefaults(RestoreDefaultsOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
+            options.Validate();
+            var report = _restoreEngine.RestoreRecentFilesDefaults(options, ClearRecentFiles);
+            _executor.ClearCache();
+            return report;
+        }
+
+        /// <summary>
+        /// Restores Frequent Folders to the system-default state.
+        /// </summary>
+        /// <returns>The restore report.</returns>
+        public FrequentRestoreReport RestoreFrequentFoldersDefaults()
+        {
+            return RestoreFrequentFoldersDefaults(new RestoreDefaultsOptions());
+        }
+
+        /// <summary>
+        /// Restores Frequent Folders to the system-default state.
+        /// </summary>
+        /// <param name="options">The restore options.</param>
+        /// <returns>The restore report.</returns>
+        public FrequentRestoreReport RestoreFrequentFoldersDefaults(RestoreDefaultsOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
+            options.Validate();
+            var report = _restoreEngine.RestoreFrequentFoldersDefaults(options, RefreshExplorer);
+            _executor.ClearCache();
+            return report;
+        }
+
+        /// <summary>
         /// Locks both Quick Access backing files.
         /// </summary>
         /// <returns>A lock that must be released by calling <see cref="QuickAccessLock.Unlock()"/> or <see cref="QuickAccessLock.Dispose"/>.</returns>
@@ -1087,10 +1220,15 @@ namespace Wincent
 
         private void ExecuteMutationScript(PSScript script, string parameter, PowerShellOperation operation)
         {
+            ExecuteMutationScript(script, parameter, operation, _timeout);
+        }
+
+        private void ExecuteMutationScript(PSScript script, string parameter, PowerShellOperation operation, TimeSpan timeout)
+        {
             ExecuteWithRetry(
                 () =>
                 {
-                    _executor.ExecutePSScriptWithTimeout(script, parameter, ToTimeoutSeconds())
+                    _executor.ExecutePSScriptWithTimeout(script, parameter, ToTimeoutSeconds(timeout))
                         .GetAwaiter()
                         .GetResult();
 
@@ -1185,7 +1323,12 @@ namespace Wincent
 
         private int ToTimeoutSeconds()
         {
-            return Math.Max(1, (int)Math.Ceiling(_timeout.TotalSeconds));
+            return ToTimeoutSeconds(_timeout);
+        }
+
+        private static int ToTimeoutSeconds(TimeSpan timeout)
+        {
+            return Math.Max(1, (int)Math.Ceiling(timeout.TotalSeconds));
         }
 
         private void AddFileToRecentDocs(string filePath)
@@ -1213,9 +1356,14 @@ namespace Wincent
 
         private void ClearRecentFiles()
         {
+            ClearRecentFiles(_timeout);
+        }
+
+        private void ClearRecentFiles(TimeSpan timeout)
+        {
             StaThreadRunner.Run(
                 () => _nativeMethods.SHAddToRecentDocs(NativeMethods.SHARD_PATHW, IntPtr.Zero),
-                _timeout,
+                timeout,
                 _nativeMethods,
                 disableOle1Dde: true);
         }
@@ -1257,13 +1405,18 @@ namespace Wincent
 
         private void RefreshExplorer()
         {
+            RefreshExplorer(_timeout);
+        }
+
+        private void RefreshExplorer(TimeSpan timeout)
+        {
             try
             {
-                _explorerRefresher.Refresh(_timeout);
+                _explorerRefresher.Refresh(timeout);
             }
             catch (Exception)
             {
-                ExecuteMutationScript(PSScript.RefreshExplorer, null, PowerShellOperation.RefreshExplorer);
+                ExecuteMutationScript(PSScript.RefreshExplorer, null, PowerShellOperation.RefreshExplorer, timeout);
             }
         }
     }
