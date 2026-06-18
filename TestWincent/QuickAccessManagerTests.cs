@@ -1781,16 +1781,14 @@ namespace TestWincent
             PowerShellErrorKind kind,
             string error)
         {
-            return new PowerShellExecutionException(
-                operation,
-                kind,
-                null,
-                string.Empty,
-                error,
-                "test.ps1",
-                null,
-                TimeSpan.FromMilliseconds(1),
-                null);
+            return new PowerShellExecutionException(new PowerShellExecutionExceptionOptions
+            {
+                Operation = operation,
+                Kind = kind,
+                StandardError = error,
+                ScriptPath = "test.ps1",
+                Duration = TimeSpan.FromMilliseconds(1)
+            });
         }
 
         private QuickAccessManager CreateManager(IQuickAccessNativeQuery nativeQuery)

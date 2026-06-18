@@ -330,6 +330,21 @@ namespace Wincent
         CmdletNotFound
     }
 
+    // Internal construction options keep call sites readable without expanding the public API surface.
+    internal sealed class PowerShellExecutionExceptionOptions
+    {
+        public PowerShellOperation Operation { get; set; }
+        public PowerShellErrorKind Kind { get; set; }
+        public int? ExitCode { get; set; }
+        public string StandardOutput { get; set; }
+        public string StandardError { get; set; }
+        public string ScriptPath { get; set; }
+        public string Parameters { get; set; }
+        public TimeSpan? Duration { get; set; }
+        public int? NativeErrorCode { get; set; }
+        public Exception InnerException { get; set; }
+    }
+
     /// <summary>
     /// Thrown when a PowerShell-backed operation fails.
     /// </summary>
@@ -349,17 +364,47 @@ namespace Wincent
             TimeSpan? duration,
             int? nativeErrorCode,
             Exception innerException = null)
-            : base($"PowerShell operation {operation} failed with {kind}.", innerException)
+            : this(new PowerShellExecutionExceptionOptions
+            {
+                Operation = operation,
+                Kind = kind,
+                ExitCode = exitCode,
+                StandardOutput = standardOutput,
+                StandardError = standardError,
+                ScriptPath = scriptPath,
+                Parameters = parameters,
+                Duration = duration,
+                NativeErrorCode = nativeErrorCode,
+                InnerException = innerException
+            })
         {
-            Operation = operation;
-            Kind = kind;
-            ExitCode = exitCode;
-            StandardOutput = standardOutput ?? string.Empty;
-            StandardError = standardError ?? string.Empty;
-            ScriptPath = scriptPath;
-            Parameters = parameters;
-            Duration = duration;
-            NativeErrorCode = nativeErrorCode;
+        }
+
+        internal PowerShellExecutionException(PowerShellExecutionExceptionOptions options)
+            : this(RequireOptions(options), true)
+        {
+        }
+
+        private PowerShellExecutionException(PowerShellExecutionExceptionOptions options, bool validated)
+            : base($"PowerShell operation {options.Operation} failed with {options.Kind}.", options.InnerException)
+        {
+            Operation = options.Operation;
+            Kind = options.Kind;
+            ExitCode = options.ExitCode;
+            StandardOutput = options.StandardOutput ?? string.Empty;
+            StandardError = options.StandardError ?? string.Empty;
+            ScriptPath = options.ScriptPath;
+            Parameters = options.Parameters;
+            Duration = options.Duration;
+            NativeErrorCode = options.NativeErrorCode;
+        }
+
+        private static PowerShellExecutionExceptionOptions RequireOptions(PowerShellExecutionExceptionOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
+            return options;
         }
 
         /// <summary>Gets the operation.</summary>

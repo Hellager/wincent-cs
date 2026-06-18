@@ -734,17 +734,19 @@ namespace Wincent
         {
             var kind = kindOverride ?? PowerShellErrorClassifier.InferKind(innerException, error);
 
-            return new PowerShellExecutionException(
-                method.ToPowerShellOperation(),
-                kind,
-                exitCode,
-                output,
-                error,
-                scriptPath,
-                parameters,
-                duration,
-                PowerShellErrorClassifier.GetNativeErrorCode(innerException),
-                innerException);
+            return new PowerShellExecutionException(new PowerShellExecutionExceptionOptions
+            {
+                Operation = method.ToPowerShellOperation(),
+                Kind = kind,
+                ExitCode = exitCode,
+                StandardOutput = output,
+                StandardError = error,
+                ScriptPath = scriptPath,
+                Parameters = parameters,
+                Duration = duration,
+                NativeErrorCode = PowerShellErrorClassifier.GetNativeErrorCode(innerException),
+                InnerException = innerException
+            });
         }
     }
 }

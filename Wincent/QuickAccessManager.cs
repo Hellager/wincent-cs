@@ -1290,17 +1290,16 @@ namespace Wincent
             string error,
             Exception inner)
         {
-            return new PowerShellExecutionException(
-                MapPowerShellOperation(script),
-                PowerShellErrorKind.ProcessFailed,
-                exitCode,
-                output,
-                error,
-                null,
-                parameter,
-                null,
-                null,
-                inner);
+            return new PowerShellExecutionException(new PowerShellExecutionExceptionOptions
+            {
+                Operation = MapPowerShellOperation(script),
+                Kind = PowerShellErrorKind.ProcessFailed,
+                ExitCode = exitCode,
+                StandardOutput = output,
+                StandardError = error,
+                Parameters = parameter,
+                InnerException = inner
+            });
         }
 
         private static PowerShellOperation MapPowerShellOperation(PSScript script)
