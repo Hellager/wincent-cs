@@ -365,6 +365,24 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void AddItem_FrequentFolder_PowerShellAlreadyExistsSentinel_ThrowsAlreadyExists()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string>());
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 10))
+                .Throws(new QuickAccessItemAlreadyExistsException(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            var ex = Assert.ThrowsException<QuickAccessItemAlreadyExistsException>(
+                () => _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            Assert.AreEqual(@"C:\Folder", ex.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, ex.Target);
+            _executor.Verify(e => e.ClearCache(), Times.Never);
+        }
+
+        [TestMethod]
         public void AddItem_FrequentFolder_NativeTimeoutDoesNotFallBackToPowerShell()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
@@ -539,6 +557,24 @@ namespace TestWincent
                 .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.ProcessFailed, "err"));
 
             _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders);
+        }
+
+        [TestMethod]
+        public void RemoveItem_FrequentFolder_PowerShellNotFoundSentinel_ThrowsNotFound()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
+                .Throws(new QuickAccessItemNotFoundException(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            var ex = Assert.ThrowsException<QuickAccessItemNotFoundException>(
+                () => _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            Assert.AreEqual(@"C:\Folder", ex.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, ex.Target);
+            _executor.Verify(e => e.ClearCache(), Times.Never);
         }
 
         [TestMethod]

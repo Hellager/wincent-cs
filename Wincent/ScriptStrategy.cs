@@ -53,12 +53,30 @@ namespace Wincent
 
     internal abstract class PSScriptStrategyBase : IPSScriptStrategy
     {
+        internal const string AlreadyExistsSentinel = "WINCENT_ALREADY_EXISTS";
+        internal const string NotInQuickAccessSentinel = "WINCENT_NOT_IN_QUICK_ACCESS";
+
         protected const string EncodingSetup = @"
             $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
         ";
 
         protected const string ShellApplicationSetup = @"
             $shellApplication = New-Object -ComObject Shell.Application;
+        ";
+
+        protected const string NormalizePathFunction = @"
+            function Normalize-WincentPath($p) {
+                if ($null -eq $p) {
+                    return ''
+                }
+
+                $n = $p.ToLower().Replace('/', '\')
+                if ($n.Length -gt 3 -and $n.EndsWith('\')) {
+                    $n = $n.TrimEnd('\')
+                }
+
+                return $n
+            }
         ";
 
         protected static string EscapePowerShellString(string input)
@@ -150,9 +168,18 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
+                {NormalizePathFunction}
+                $requestedPath = '{parameter}';
                 $files = $shellApplication.Namespace('{ShellNamespaces.QuickAccess}').Items() | 
-                         where {{ $_.IsFolder -eq $false }};
-                $target = $files | where {{ $_.Path -eq '{parameter}' }};
+                          where {{ $_.IsFolder -eq $false }};
+                $target = $files |
+                    Where-Object {{ (Normalize-WincentPath $_.Path) -eq (Normalize-WincentPath $requestedPath) }} |
+                    Select-Object -First 1;
+                if ($null -eq $target) {{
+                    Write-Output '{NotInQuickAccessSentinel}';
+                    exit 1;
+                }}
+
                 $target.InvokeVerb('remove');
             ";
         }
@@ -170,7 +197,19 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
-                $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome');
+                {NormalizePathFunction}
+                $requestedPath = '{parameter}';
+                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items() |
+                    where {{ $_.IsFolder -eq $true }};
+                $target = $folders |
+                    Where-Object {{ (Normalize-WincentPath $_.Path) -eq (Normalize-WincentPath $requestedPath) }} |
+                    Select-Object -First 1;
+                if ($null -ne $target) {{
+                    Write-Output '{AlreadyExistsSentinel}';
+                    exit 1;
+                }}
+
+                $shellApplication.Namespace($requestedPath).Self.InvokeVerb('pintohome');
             ";
         }
     }
@@ -187,39 +226,86 @@ namespace Wincent
             return $@"
                 {EncodingSetup}
                 {ShellApplicationSetup}
-                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
-                if ($null -eq $target) {{ throw 'Target path not found in Frequent Folders namespace: {parameter}' }}
+                {NormalizePathFunction}
+                $requestedPath = '{parameter}';
 
-                $target.InvokeVerb('unpinfromhome');
-                Start-Sleep -Milliseconds 1000;
+                function Find-WincentFrequentFolder {{
+                    $finderShell = New-Object -ComObject Shell.Application;
+                    $folder = $finderShell.Namespace('{ShellNamespaces.FrequentFolders}');
+                    if ($null -eq $folder) {{
+                        throw 'Failed to open Frequent Folders namespace'
+                    }}
 
-                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
-                if ($null -eq $target) {{ return }}
+                    $folder.Items() |
+                        Where-Object {{ (Normalize-WincentPath $_.Path) -eq (Normalize-WincentPath $requestedPath) }} |
+                        Select-Object -First 1
+                }}
 
-                $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome');
-                Start-Sleep -Milliseconds 1000;
+                function Wait-WincentFrequentFolderPresence($expected) {{
+                    $deadline = (Get-Date).AddMilliseconds(1000)
+                    while ((Get-Date) -lt $deadline) {{
+                        $exists = $null -ne (Find-WincentFrequentFolder)
+                        if ($exists -eq $expected) {{
+                            return $true
+                        }}
 
-                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
-                if ($null -eq $target) {{ return }}
+                        $remaining = [int][Math]::Ceiling(($deadline - (Get-Date)).TotalMilliseconds)
+                        if ($remaining -le 0) {{
+                            break
+                        }}
+                        Start-Sleep -Milliseconds ([Math]::Min(100, $remaining))
+                    }}
+
+                    $exists = $null -ne (Find-WincentFrequentFolder)
+                    return ($exists -eq $expected)
+                }}
+
+                function Invoke-WincentUnpinFromHome($item) {{
+                    try {{
+                        $item.InvokeVerb('unpinfromhome');
+                    }} catch {{}}
+                }}
+
+                function Invoke-WincentPinToHomeToggle {{
+                    $shellApplication.Namespace($requestedPath).Self.InvokeVerb('pintohome')
+                }}
+
+                $target = Find-WincentFrequentFolder;
+                if ($null -eq $target) {{
+                    Write-Output '{NotInQuickAccessSentinel}';
+                    exit 1;
+                }}
+
+                Invoke-WincentUnpinFromHome $target;
+                if (Wait-WincentFrequentFolderPresence $false) {{
+                    return
+                }}
+
+                Invoke-WincentPinToHomeToggle;
+                if (Wait-WincentFrequentFolderPresence $false) {{
+                    return
+                }}
+
+                $target = Find-WincentFrequentFolder;
+                if ($null -eq $target) {{
+                    return
+                }}
 
                 $isWin11 = (Get-CimInstance -Class Win32_OperatingSystem).Caption -Match 'Windows 11'
                 if ($isWin11)
                 {{
-                    $shellApplication.Namespace('{parameter}').Self.InvokeVerb('pintohome')
+                    Invoke-WincentPinToHomeToggle
                 }}
                 else
                 {{
-                    $target.InvokeVerb('unpinfromhome');
+                    Invoke-WincentUnpinFromHome $target;
                 }}
 
-                Start-Sleep -Milliseconds 1000;
+                if (Wait-WincentFrequentFolderPresence $false) {{
+                    return
+                }}
 
-                $folders = $shellApplication.Namespace('{ShellNamespaces.FrequentFolders}').Items();
-                $target = $folders | where {{ $_.Path -eq '{parameter}' }};
-                if ($null -ne $target) {{ throw 'Failed to remove frequent folder: {parameter}' }}
+                throw ""Failed to remove frequent folder: $requestedPath""
             ";
         }
     }

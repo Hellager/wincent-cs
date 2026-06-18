@@ -321,8 +321,30 @@ namespace TestWincent
             var script = strategy.GenerateScript(testPath);
 
             Assert.IsFalse(script.Contains("$scriptPath"), "Unpin script should not reference undefined $scriptPath variable");
-            StringAssert.Contains(script, $@"Namespace('{testPath}')");
-            StringAssert.Contains(script, $@"Path -eq '{testPath}'");
+            StringAssert.Contains(script, "$requestedPath");
+            StringAssert.Contains(script, "Normalize-WincentPath");
+            Assert.IsFalse(script.Contains($@"Path -eq '{testPath}'"), "Unpin script should not use exact string path comparison");
+        }
+
+        [TestMethod]
+        public void MutationFallbackScripts_NormalizePathsAndEmitSentinels()
+        {
+            var remove = new RemoveRecentFileStrategy().GenerateScript(@"C:\Users\User\Documents\file.txt");
+            var pin = new PinToFrequentFolderStrategy().GenerateScript(@"C:\Users\User\Documents");
+            var unpin = new UnpinFromFrequentFolderStrategy().GenerateScript(@"C:\Users\User\Documents");
+
+            StringAssert.Contains(remove, "Normalize-WincentPath");
+            StringAssert.Contains(remove, "WINCENT_NOT_IN_QUICK_ACCESS");
+            Assert.IsFalse(remove.Contains("$_.Path -eq"), "RemoveRecentFile should use normalized path comparison");
+
+            StringAssert.Contains(pin, "Normalize-WincentPath");
+            StringAssert.Contains(pin, "WINCENT_ALREADY_EXISTS");
+            StringAssert.Contains(pin, "Select-Object -First 1");
+
+            StringAssert.Contains(unpin, "Normalize-WincentPath");
+            StringAssert.Contains(unpin, "WINCENT_NOT_IN_QUICK_ACCESS");
+            StringAssert.Contains(unpin, "Wait-WincentFrequentFolderPresence");
+            Assert.IsFalse(unpin.Contains("$_.Path -eq"), "UnpinFromFrequentFolder should use normalized path comparison");
         }
 
         [TestMethod]
@@ -346,10 +368,10 @@ namespace TestWincent
 
             var script = strategy.GenerateScript(testPath);
 
-            StringAssert.Contains(script, "$target.InvokeVerb('unpinfromhome')");
-            StringAssert.Contains(script, $@"$shellApplication.Namespace('{testPath}').Self.InvokeVerb('pintohome')");
-            StringAssert.Contains(script, "Start-Sleep -Milliseconds 1000");
-            StringAssert.Contains(script, "if ($null -eq $target) { return }");
+            StringAssert.Contains(script, "Invoke-WincentUnpinFromHome $target");
+            StringAssert.Contains(script, "Invoke-WincentPinToHomeToggle");
+            StringAssert.Contains(script, "Wait-WincentFrequentFolderPresence");
+            StringAssert.Contains(script, "if ($null -eq $target)");
             StringAssert.Contains(script, "Failed to remove frequent folder");
         }
 

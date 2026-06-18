@@ -579,6 +579,16 @@ namespace Wincent
                 // Re-throw for caller handling
                 throw;
             }
+            catch (QuickAccessItemAlreadyExistsException)
+            {
+                // Re-throw sentinel-mapped domain exceptions for caller handling.
+                throw;
+            }
+            catch (QuickAccessItemNotFoundException)
+            {
+                // Re-throw sentinel-mapped domain exceptions for caller handling.
+                throw;
+            }
             catch (ScriptTimeoutException) when (timeoutSeconds <= 0)
             {
                 // Re-throw for caller handling
@@ -669,6 +679,10 @@ namespace Wincent
             if (result.ExitCode == 0)
                 return;
 
+            Exception sentinelException = TryCreateSentinelException(method, parameter, result.Output);
+            if (sentinelException != null)
+                throw sentinelException;
+
             throw CreatePowerShellException(
                 method,
                 parameter,
@@ -679,6 +693,31 @@ namespace Wincent
                 parameter,
                 timeoutSeconds > 0 ? (TimeSpan?)TimeSpan.FromSeconds(timeoutSeconds) : null,
                 null);
+        }
+
+        private static Exception TryCreateSentinelException(PSScript method, string parameter, string output)
+        {
+            if (string.IsNullOrEmpty(output))
+                return null;
+
+            if (output.Contains(PSScriptStrategyBase.AlreadyExistsSentinel) &&
+                method == PSScript.PinToFrequentFolder)
+            {
+                return new QuickAccessItemAlreadyExistsException(parameter, QuickAccess.FrequentFolders);
+            }
+
+            if (!output.Contains(PSScriptStrategyBase.NotInQuickAccessSentinel))
+                return null;
+
+            switch (method)
+            {
+                case PSScript.RemoveRecentFile:
+                    return new QuickAccessItemNotFoundException(parameter, QuickAccess.RecentFiles);
+                case PSScript.UnpinFromFrequentFolder:
+                    return new QuickAccessItemNotFoundException(parameter, QuickAccess.FrequentFolders);
+                default:
+                    return null;
+            }
         }
 
         private static PowerShellExecutionException CreatePowerShellException(

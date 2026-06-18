@@ -227,6 +227,45 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public async Task ExecutePSScriptWithTimeout_PinAlreadyExistsSentinel_ThrowsAlreadyExistsException()
+        {
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output 'WINCENT_ALREADY_EXISTS'; exit 1";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            var exception = await Assert.ThrowsExceptionAsync<QuickAccessItemAlreadyExistsException>(
+                () => _executor.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 1));
+
+            Assert.AreEqual(@"C:\Folder", exception.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, exception.Target);
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithTimeout_RemoveRecentNotFoundSentinel_ThrowsNotFoundException()
+        {
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output 'WINCENT_NOT_IN_QUICK_ACCESS'; exit 1";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            var exception = await Assert.ThrowsExceptionAsync<QuickAccessItemNotFoundException>(
+                () => _executor.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 1));
+
+            Assert.AreEqual(@"C:\test.txt", exception.Path);
+            Assert.AreEqual(QuickAccess.RecentFiles, exception.Target);
+        }
+
+        [TestMethod]
+        public async Task ExecutePSScriptWithTimeout_UnpinNotFoundSentinel_ThrowsNotFoundException()
+        {
+            string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output 'WINCENT_NOT_IN_QUICK_ACCESS'; exit 1";
+            File.WriteAllText(_tempScriptPath, scriptContent, Encoding.UTF8);
+
+            var exception = await Assert.ThrowsExceptionAsync<QuickAccessItemNotFoundException>(
+                () => _executor.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 1));
+
+            Assert.AreEqual(@"C:\Folder", exception.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, exception.Target);
+        }
+
+        [TestMethod]
         public async Task ExecutePSScriptWithCache_DataFileModified_InvalidatesCache()
         {
             string scriptContent = "[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Write-Output 'CacheInvalidate'; exit 0";
