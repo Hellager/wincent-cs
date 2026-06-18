@@ -365,6 +365,21 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void AddItem_FrequentFolder_NativeTimeoutDoesNotFallBackToPowerShell()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string>());
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new TimeoutException("native timed out"));
+
+            Assert.ThrowsException<TimeoutException>(() =>
+                _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 10), Times.Never);
+            _executor.Verify(e => e.ClearCache(), Times.Never);
+        }
+
+        [TestMethod]
         [ExpectedException(typeof(UnsupportedQuickAccessOperationException))]
         public void AddItem_All_ThrowsUnsupportedOperation()
         {

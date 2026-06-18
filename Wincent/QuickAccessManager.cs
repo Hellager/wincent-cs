@@ -609,7 +609,8 @@ namespace Wincent
                         () => _nativeMutation.PinFrequentFolder(path, _timeout),
                         PSScript.PinToFrequentFolder,
                         path,
-                        PowerShellOperation.PinFrequentFolder);
+                        PowerShellOperation.PinFrequentFolder,
+                        fallbackOnTimeout: false);
                     added = true;
                 }
 
@@ -1429,20 +1430,26 @@ namespace Wincent
             Action nativeAction,
             PSScript fallbackScript,
             string parameter,
-            PowerShellOperation operation)
+            PowerShellOperation operation,
+            bool fallbackOnTimeout = true)
         {
             try
             {
                 nativeAction();
             }
-            catch (Exception ex) when (ShouldFallbackToPowerShell(ex))
+            catch (Exception ex) when (ShouldFallbackToPowerShell(ex, fallbackOnTimeout))
             {
                 ExecuteMutationScript(fallbackScript, parameter, operation);
             }
         }
 
-        private static bool ShouldFallbackToPowerShell(Exception exception)
+        private static bool ShouldFallbackToPowerShell(Exception exception, bool fallbackOnTimeout)
         {
+            if (!fallbackOnTimeout && exception is TimeoutException)
+            {
+                return false;
+            }
+
             if (exception is QuickAccessItemNotFoundException ||
                 exception is QuickAccessItemAlreadyExistsException ||
                 exception is UnsupportedQuickAccessOperationException ||
