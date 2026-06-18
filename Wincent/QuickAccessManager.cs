@@ -575,9 +575,9 @@ namespace Wincent
         /// <exception cref="UnsupportedQuickAccessOperationException"><paramref name="target"/> is <see cref="QuickAccess.All"/>.</exception>
         /// <remarks>
         /// This method modifies the current Windows user's Quick Access state. When
-        /// <see cref="AddOptions.RefreshRecentFiles"/> is enabled for recent files, the current Recent Files backing
-        /// data is removed to force Explorer to rebuild it. Frequent folders are pinned with a native Shell verb first
-        /// and fall back to PowerShell only when the native Shell operation fails.
+        /// <see cref="AddOptions.ForceRecentFilesRebuild"/> is enabled for recent files, the current Recent Files
+        /// backing data is removed to force Explorer to rebuild it. Frequent folders are pinned with a native Shell verb
+        /// first and fall back to PowerShell only when the native Shell operation fails.
         /// </remarks>
         public void AddItem(string path, QuickAccess target, AddOptions options)
         {

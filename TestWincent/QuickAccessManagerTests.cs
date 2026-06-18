@@ -319,6 +319,17 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void AddItem_RecentFileWithForceRecentFilesRebuild_RemovesRecentBackingFile()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string>());
+
+            _manager.AddItem(@"C:\test.txt", QuickAccess.RecentFiles, new AddOptions { ForceRecentFilesRebuild = true });
+
+            _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Once);
+        }
+
+        [TestMethod]
         public void AddItem_WithRefreshExplorer_RefreshesAfterSuccessfulAdd()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
@@ -1072,6 +1083,23 @@ namespace TestWincent
                     QuickAccessItem.RecentFile(@"C:\two.txt")
                 },
                 new BatchOptions { RefreshRecentFiles = true });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(2, result.Succeeded.Count);
+            Assert.AreEqual(0, result.Failed.Count);
+            _dataFiles.Verify(d => d.RemoveRecentFile(), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItems_WithForceRecentFilesRebuild_CoalescesRecentRebuildOnceAfterSuccessfulRecentAdds()
+        {
+            var result = _manager.AddItems(
+                new[]
+                {
+                    QuickAccessItem.RecentFile(@"C:\one.txt"),
+                    QuickAccessItem.RecentFile(@"C:\two.txt")
+                },
+                new BatchOptions { ForceRecentFilesRebuild = true });
 
             Assert.AreEqual(2, result.Total);
             Assert.AreEqual(2, result.Succeeded.Count);

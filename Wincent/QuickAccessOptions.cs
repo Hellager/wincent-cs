@@ -29,13 +29,26 @@ namespace Wincent
     public sealed class AddOptions
     {
         /// <summary>
-        /// Gets or sets whether Recent Files backing data should be refreshed after adding a recent file.
+        /// Gets or sets whether Recent Files backing data should be rebuilt after adding a recent file.
         /// </summary>
         /// <remarks>
-        /// This maps to the Rust upstream <c>force_update</c> option through its <c>refresh_recent_files()</c>
-        /// convenience method.
+        /// Prefer <see cref="ForceRecentFilesRebuild"/> for new code. This property is kept as a compatibility alias
+        /// for the same behavior.
         /// </remarks>
         public bool RefreshRecentFiles { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether Recent Files backing data should be rebuilt after adding a recent file.
+        /// </summary>
+        /// <remarks>
+        /// This corresponds to Rust upstream <c>AddOptions::force_recent_files_rebuild</c> /
+        /// <c>with_force_recent_files_rebuild</c>.
+        /// </remarks>
+        public bool ForceRecentFilesRebuild
+        {
+            get { return RefreshRecentFiles; }
+            set { RefreshRecentFiles = value; }
+        }
 
         /// <summary>
         /// Gets or sets whether Explorer windows should be refreshed after a successful add.
@@ -127,9 +140,26 @@ namespace Wincent
     public sealed class BatchOptions
     {
         /// <summary>
-        /// Gets or sets whether Recent Files backing data should be refreshed once after a batch add.
+        /// Gets or sets whether Recent Files backing data should be rebuilt once after a batch add.
         /// </summary>
+        /// <remarks>
+        /// Prefer <see cref="ForceRecentFilesRebuild"/> for new code. This property is kept as a compatibility alias
+        /// for the same behavior.
+        /// </remarks>
         public bool RefreshRecentFiles { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether Recent Files backing data should be rebuilt once after a batch add.
+        /// </summary>
+        /// <remarks>
+        /// This corresponds to Rust upstream <c>BatchOptions::force_recent_files_rebuild</c> /
+        /// <c>with_force_recent_files_rebuild</c>.
+        /// </remarks>
+        public bool ForceRecentFilesRebuild
+        {
+            get { return RefreshRecentFiles; }
+            set { RefreshRecentFiles = value; }
+        }
 
         /// <summary>
         /// Gets or sets whether Explorer windows should be refreshed once after successful batch mutations.
