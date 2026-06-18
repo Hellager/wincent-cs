@@ -169,6 +169,27 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void GetItems_TransientFallbackFailure_RetriesNativeQuery()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.SetupSequence(n => n.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("Failed to open shell namespace: shell:::broken"))
+                .Returns(new List<string> { @"C:\native-after-retry" });
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.QueryFrequentFolders, PowerShellErrorKind.Timeout, "operation timed out"));
+            _manager.Dispose();
+            _manager = CreateManager(
+                nativeQuery.Object,
+                new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false));
+
+            var result = _manager.GetItems(QuickAccess.FrequentFolders);
+
+            CollectionAssert.AreEqual(new[] { @"C:\native-after-retry" }, result.ToList());
+            nativeQuery.Verify(n => n.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)), Times.Exactly(2));
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10), Times.Once);
+        }
+
+        [TestMethod]
         public void GetItems_NativeAndPowerShellFailure_ThrowsPowerShellExecutionException()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
@@ -676,16 +697,21 @@ namespace TestWincent
                 _fileSystem.Object,
                 _nativeMethods.Object,
                 _dataFiles.Object,
-                new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false));
+                new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false),
+                new PowerShellFallbackNativeQuery(),
+                _nativeMutation.Object);
 
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new COMException("Shell verb failed.", unchecked((int)0x80004005)));
             _executor.SetupSequence(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
                 .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.Timeout, "operation timed out"))
                 .ReturnsAsync(new ScriptResult(0, string.Empty, string.Empty));
 
             _manager.RemoveItem(@"C:\Folder", QuickAccess.FrequentFolders);
 
+            _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)), Times.Exactly(2));
             _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10), Times.Exactly(2));
         }
 
@@ -1707,13 +1733,18 @@ namespace TestWincent
 
         private QuickAccessManager CreateManager(IQuickAccessNativeQuery nativeQuery)
         {
+            return CreateManager(nativeQuery, RetryPolicy.Standard);
+        }
+
+        private QuickAccessManager CreateManager(IQuickAccessNativeQuery nativeQuery, RetryPolicy retryPolicy)
+        {
             return new QuickAccessManager(
                 _executor.Object,
                 TimeSpan.FromSeconds(10),
                 _fileSystem.Object,
                 _nativeMethods.Object,
                 _dataFiles.Object,
-                RetryPolicy.Standard,
+                retryPolicy,
                 nativeQuery);
         }
 

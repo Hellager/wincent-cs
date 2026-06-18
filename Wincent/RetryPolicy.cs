@@ -3,7 +3,7 @@ using System;
 namespace Wincent
 {
     /// <summary>
-    /// Controls retry behavior for transient fallback operations.
+    /// Controls retry behavior for transient manager shell operations.
     /// </summary>
     public sealed class RetryPolicy
     {

@@ -18,7 +18,7 @@ namespace Wincent
         public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(10);
 
         /// <summary>
-        /// Gets or sets the retry policy for transient fallback operations.
+        /// Gets or sets the retry policy for transient manager shell operations.
         /// </summary>
         public RetryPolicy RetryPolicy { get; set; } = RetryPolicy.Standard;
     }

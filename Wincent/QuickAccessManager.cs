@@ -481,20 +481,23 @@ namespace Wincent
         /// <exception cref="PowerShellExecutionException">The PowerShell fallback query fails.</exception>
         public IReadOnlyList<string> GetItems(QuickAccess target)
         {
-            try
+            return ExecuteWithRetry(() =>
             {
-                return _nativeQuery.GetItems(target, _timeout);
-            }
-            catch (Exception)
-            {
-                if (target == QuickAccess.All)
-                    return QuickAccessQueryMerger.MergeRecentAndFrequent(
-                        ExecuteListScript(PSScript.QueryRecentFile, null, ToTimeoutSeconds()),
-                        ExecuteListScript(PSScript.QueryFrequentFolder, null, ToTimeoutSeconds()));
+                try
+                {
+                    return _nativeQuery.GetItems(target, _timeout);
+                }
+                catch (Exception)
+                {
+                    if (target == QuickAccess.All)
+                        return QuickAccessQueryMerger.MergeRecentAndFrequent(
+                            ExecuteListScript(PSScript.QueryRecentFile, null, ToTimeoutSeconds()),
+                            ExecuteListScript(PSScript.QueryFrequentFolder, null, ToTimeoutSeconds()));
 
-                var script = MapQueryScript(target);
-                return ExecuteListScript(script, null, ToTimeoutSeconds());
-            }
+                    var script = MapQueryScript(target);
+                    return ExecuteListScript(script, null, ToTimeoutSeconds());
+                }
+            });
         }
 
         /// <summary>
@@ -1462,11 +1465,10 @@ namespace Wincent
 
         private IReadOnlyList<string> ExecuteListScript(PSScript script, string parameter, int timeoutSeconds)
         {
-            return ExecuteWithRetry(() =>
-                _executor.ExecutePSScriptWithCache(script, parameter, timeoutSeconds)
-                    .GetAwaiter()
-                    .GetResult()
-                    .AsReadOnly());
+            return _executor.ExecutePSScriptWithCache(script, parameter, timeoutSeconds)
+                .GetAwaiter()
+                .GetResult()
+                .AsReadOnly();
         }
 
         private void ExecuteMutationScript(PSScript script, string parameter, PowerShellOperation operation)
@@ -1476,15 +1478,9 @@ namespace Wincent
 
         private void ExecuteMutationScript(PSScript script, string parameter, PowerShellOperation operation, TimeSpan timeout)
         {
-            ExecuteWithRetry(
-                () =>
-                {
-                    _executor.ExecutePSScriptWithTimeout(script, parameter, ToTimeoutSeconds(timeout))
-                        .GetAwaiter()
-                        .GetResult();
-
-                    return true;
-                });
+            _executor.ExecutePSScriptWithTimeout(script, parameter, ToTimeoutSeconds(timeout))
+                .GetAwaiter()
+                .GetResult();
         }
 
         private void ExecuteNativeMutationWithPowerShellFallback(
@@ -1493,13 +1489,69 @@ namespace Wincent
             string parameter,
             PowerShellOperation operation)
         {
-            try
+            ExecuteWithRetry(
+                () =>
+                {
+                    try
+                    {
+                        nativeAction();
+                    }
+                    catch (Exception ex) when (ShouldFallbackToPowerShell(ex))
+                    {
+                        ExecuteMutationScript(fallbackScript, parameter, operation);
+                    }
+
+                    return true;
+                });
+        }
+
+        private bool ShouldRetry(Exception exception, int retryAttempt)
+        {
+            if (_retryPolicy.MaxRetryCount == 0 || retryAttempt >= _retryPolicy.MaxRetryCount)
+                return false;
+
+            if (exception is PowerShellExecutionException powerShellException)
+                return ShouldRetry(powerShellException);
+
+            return IsRetryableShellFailure(exception);
+        }
+
+        private static bool ShouldRetry(PowerShellExecutionException exception)
+        {
+            if (exception.Kind == PowerShellErrorKind.Timeout)
+                return true;
+
+            string stderr = exception.StandardError ?? string.Empty;
+            return stderr.IndexOf("locked", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   stderr.IndexOf("temporarily unavailable", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsRetryableShellFailure(Exception exception)
+        {
+            if (exception is TimeoutException)
+                return false;
+
+            if (exception is COMException)
+                return true;
+
+            var invalidOperation = exception as InvalidOperationException;
+            return invalidOperation != null &&
+                   IsRecoverableNativeShellFailure(invalidOperation) &&
+                   !IsNativeDisabledFallbackMarker(invalidOperation);
+        }
+
+        private T ExecuteWithRetry<T>(Func<T> action)
+        {
+            for (int retryAttempt = 0; ; retryAttempt++)
             {
-                nativeAction();
-            }
-            catch (Exception ex) when (ShouldFallbackToPowerShell(ex))
-            {
-                ExecuteMutationScript(fallbackScript, parameter, operation);
+                try
+                {
+                    return action();
+                }
+                catch (Exception ex) when (ShouldRetry(ex, retryAttempt))
+                {
+                    System.Threading.Thread.Sleep(_retryPolicy.GetDelay(retryAttempt));
+                }
             }
         }
 
@@ -1524,35 +1576,15 @@ namespace Wincent
                    message.StartsWith("Failed to open shell folder:", StringComparison.Ordinal) ||
                    message.StartsWith("Failed to get shell folder self item:", StringComparison.Ordinal) ||
                    message == "Shell.Application COM object is not available." ||
+                   message == "Native Quick Access query is disabled for this instance." ||
                    message == "Native Quick Access mutation is disabled for this instance.";
         }
 
-        private T ExecuteWithRetry<T>(Func<T> action)
+        private static bool IsNativeDisabledFallbackMarker(InvalidOperationException exception)
         {
-            for (int retryAttempt = 0; ; retryAttempt++)
-            {
-                try
-                {
-                    return action();
-                }
-                catch (PowerShellExecutionException ex) when (ShouldRetry(ex, retryAttempt))
-                {
-                    System.Threading.Thread.Sleep(_retryPolicy.GetDelay(retryAttempt));
-                }
-            }
-        }
-
-        private bool ShouldRetry(PowerShellExecutionException exception, int retryAttempt)
-        {
-            if (_retryPolicy.MaxRetryCount == 0 || retryAttempt >= _retryPolicy.MaxRetryCount)
-                return false;
-
-            if (exception.Kind == PowerShellErrorKind.Timeout)
-                return true;
-
-            string stderr = exception.StandardError ?? string.Empty;
-            return stderr.IndexOf("locked", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   stderr.IndexOf("temporarily unavailable", StringComparison.OrdinalIgnoreCase) >= 0;
+            string message = exception.Message ?? string.Empty;
+            return message == "Native Quick Access query is disabled for this instance." ||
+                   message == "Native Quick Access mutation is disabled for this instance.";
         }
 
         private PowerShellExecutionException CreatePowerShellException(
