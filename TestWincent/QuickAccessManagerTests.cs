@@ -90,16 +90,20 @@ namespace TestWincent
         private delegate void SHGetKnownFolderPathCallback(Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
 
         [TestMethod]
-        public void GetItems_All_UsesQuickAccessQuery()
+        public void GetItems_All_UsesMergedRecentAndFrequentFallback()
         {
-            var expected = new List<string> { @"C:\a.txt", @"C:\folder" };
-            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10))
-                .ReturnsAsync(expected);
+            var expected = new List<string> { @"C:\a.txt", @"C:\shared", @"C:\folder" };
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\a.txt", @"C:\shared" });
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { @"c:/shared/", @"C:\folder" });
 
             var result = _manager.GetItems(QuickAccess.All);
 
             CollectionAssert.AreEqual(expected, result.ToList());
-            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10), Times.Never);
         }
 
         [TestMethod]
@@ -170,15 +174,15 @@ namespace TestWincent
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
             nativeQuery.Setup(n => n.GetItems(QuickAccess.All, It.IsAny<TimeSpan>()))
                 .Throws(new InvalidOperationException("native failed"));
-            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryQuickAccess, null, 10))
-                .Throws(CreatePowerShellException(PowerShellOperation.QueryQuickAccess, PowerShellErrorKind.ProcessFailed, "fallback failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.QueryRecentFiles, PowerShellErrorKind.ProcessFailed, "fallback failed"));
             _manager.Dispose();
             _manager = CreateManager(nativeQuery.Object);
 
             var exception = Assert.ThrowsException<PowerShellExecutionException>(
                 () => _manager.GetItems(QuickAccess.All));
 
-            Assert.AreEqual(PowerShellOperation.QueryQuickAccess, exception.Operation);
+            Assert.AreEqual(PowerShellOperation.QueryRecentFiles, exception.Operation);
         }
 
         [TestMethod]

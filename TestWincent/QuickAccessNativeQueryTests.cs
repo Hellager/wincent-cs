@@ -10,12 +10,10 @@ namespace TestWincent
     public class QuickAccessNativeQueryTests
     {
         [TestMethod]
-        public void ForTarget_All_UsesQuickAccessNamespaceWithoutFilter()
+        public void ForTarget_All_ThrowsArgumentOutOfRangeException()
         {
-            var spec = QuickAccessNativeQueryMapping.ForTarget(QuickAccess.All);
-
-            Assert.AreEqual(ShellNamespaces.QuickAccess, spec.Namespace);
-            Assert.AreEqual(QuickAccessNativeQueryFilter.All, spec.Filter);
+            Assert.ThrowsException<ArgumentOutOfRangeException>(
+                () => QuickAccessNativeQueryMapping.ForTarget(QuickAccess.All));
         }
 
         [TestMethod]
@@ -51,6 +49,45 @@ namespace TestWincent
             Assert.IsFalse(QuickAccessNativeQueryMapping.ShouldKeep(new FakeShellItem { IsFolder = true }, QuickAccessNativeQueryFilter.FilesOnly));
             Assert.IsTrue(QuickAccessNativeQueryMapping.ShouldKeep(new FakeShellItem { IsFolder = true }, QuickAccessNativeQueryFilter.FoldersOnly));
             Assert.IsFalse(QuickAccessNativeQueryMapping.ShouldKeep(new FakeShellItem { IsFolder = false }, QuickAccessNativeQueryFilter.FoldersOnly));
+        }
+
+        [TestMethod]
+        public void MergeRecentAndFrequent_PreservesRecentFirstAndDeduplicatesPaths()
+        {
+            var result = QuickAccessQueryMerger.MergeRecentAndFrequent(
+                new[] { @"C:\Recent.txt", @"C:\Shared" },
+                new[] { @"c:/shared/", @"C:\Folder" });
+
+            CollectionAssert.AreEqual(
+                new[] { @"C:\Recent.txt", @"C:\Shared", @"C:\Folder" },
+                result.ToList());
+        }
+
+        [TestMethod]
+        public void GetItems_All_MergesRecentAndFrequentFolders()
+        {
+            var nativeMethods = new Moq.Mock<INativeMethods>(Moq.MockBehavior.Strict);
+            nativeMethods.Setup(n => n.CoInitializeEx(IntPtr.Zero, 2))
+                .Returns(0);
+            nativeMethods.Setup(n => n.CoUninitialize());
+            var shellApplication = new FakeShellApplication();
+            shellApplication.Folders[ShellNamespaces.QuickAccess] = new FakeFolder(
+                new FakeShellItem { IsFolder = false, Path = @"C:\Recent.txt" },
+                new FakeShellItem { IsFolder = true, Path = @"C:\PinnedFromQuickAccess" },
+                new FakeShellItem { IsFolder = false, Path = @"C:\Shared" });
+            shellApplication.Folders[ShellNamespaces.FrequentFolders] = new FakeFolder(
+                new FakeShellItem { IsFolder = true, Path = @"c:/shared/" },
+                new FakeShellItem { IsFolder = true, Path = @"C:\Folder" });
+            var query = new ShellQuickAccessNativeQuery(
+                nativeMethods.Object,
+                new FakeShellApplicationFactory(shellApplication));
+
+            var result = query.GetItems(QuickAccess.All, TimeSpan.FromSeconds(1));
+
+            CollectionAssert.AreEqual(
+                new[] { @"C:\Recent.txt", @"C:\Shared", @"C:\Folder" },
+                result.ToList());
+            nativeMethods.Verify(n => n.CoUninitialize(), Moq.Times.Once);
         }
 
         [TestMethod]

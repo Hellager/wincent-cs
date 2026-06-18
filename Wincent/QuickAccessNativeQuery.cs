@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Wincent
@@ -44,6 +45,19 @@ namespace Wincent
 
         public IReadOnlyList<string> GetItems(QuickAccess target, TimeSpan timeout)
         {
+            if (target == QuickAccess.All)
+            {
+                return StaThreadRunner.Run(
+                    () =>
+                    {
+                        var recent = EnumerateItemsOnSta(QuickAccessNativeQueryMapping.ForTarget(QuickAccess.RecentFiles));
+                        var frequent = EnumerateItemsOnSta(QuickAccessNativeQueryMapping.ForTarget(QuickAccess.FrequentFolders));
+                        return QuickAccessQueryMerger.MergeRecentAndFrequent(recent, frequent);
+                    },
+                    timeout,
+                    _nativeMethods);
+            }
+
             var query = QuickAccessNativeQueryMapping.ForTarget(target);
             return StaThreadRunner.Run(() => EnumerateItemsOnSta(query), timeout, _nativeMethods);
         }
@@ -147,8 +161,6 @@ namespace Wincent
         {
             switch (target)
             {
-                case QuickAccess.All:
-                    return new QuickAccessNativeQuerySpec(ShellNamespaces.QuickAccess, QuickAccessNativeQueryFilter.All);
                 case QuickAccess.RecentFiles:
                     return new QuickAccessNativeQuerySpec(ShellNamespaces.QuickAccess, QuickAccessNativeQueryFilter.FilesOnly);
                 case QuickAccess.FrequentFolders:
@@ -170,6 +182,36 @@ namespace Wincent
                     return Convert.ToBoolean(item.IsFolder);
                 default:
                     throw new ArgumentOutOfRangeException(nameof(filter), filter, "Unsupported query filter.");
+            }
+        }
+    }
+
+    internal static class QuickAccessQueryMerger
+    {
+        public static IReadOnlyList<string> MergeRecentAndFrequent(
+            IEnumerable<string> recentFiles,
+            IEnumerable<string> frequentFolders)
+        {
+            var merged = new List<string>();
+
+            AddDistinct(merged, recentFiles);
+            AddDistinct(merged, frequentFolders);
+
+            return merged.AsReadOnly();
+        }
+
+        private static void AddDistinct(ICollection<string> merged, IEnumerable<string> paths)
+        {
+            if (paths == null)
+                return;
+
+            foreach (string path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                    continue;
+
+                if (!merged.Any(existing => WindowsPathComparer.Equals(existing, path)))
+                    merged.Add(path);
             }
         }
     }

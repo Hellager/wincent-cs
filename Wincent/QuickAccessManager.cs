@@ -481,13 +481,18 @@ namespace Wincent
         /// <exception cref="PowerShellExecutionException">The PowerShell fallback query fails.</exception>
         public IReadOnlyList<string> GetItems(QuickAccess target)
         {
-            var script = MapQueryScript(target);
             try
             {
                 return _nativeQuery.GetItems(target, _timeout);
             }
             catch (Exception)
             {
+                if (target == QuickAccess.All)
+                    return QuickAccessQueryMerger.MergeRecentAndFrequent(
+                        ExecuteListScript(PSScript.QueryRecentFile, null, ToTimeoutSeconds()),
+                        ExecuteListScript(PSScript.QueryFrequentFolder, null, ToTimeoutSeconds()));
+
+                var script = MapQueryScript(target);
                 return ExecuteListScript(script, null, ToTimeoutSeconds());
             }
         }
