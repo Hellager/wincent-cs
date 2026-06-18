@@ -48,14 +48,20 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void IsVisible_UnsupportedValueKind_ThrowsInvalidOperationException()
+        public void IsVisible_UnsupportedValueKind_ThrowsVisibilityException()
         {
             var registry = new StubRegistry();
             registry.Values["ShowRecent"] = new byte[] { 1 };
             registry.ValueKinds["ShowRecent"] = RegistryValueKind.Binary;
             var visibility = new RegistryQuickAccessVisibility(registry);
 
-            Assert.ThrowsException<InvalidOperationException>(() => visibility.IsVisible(QuickAccess.RecentFiles));
+            var ex = Assert.ThrowsException<QuickAccessVisibilityException>(
+                () => visibility.IsVisible(QuickAccess.RecentFiles));
+
+            Assert.AreEqual("ReadVisibility", ex.Operation);
+            Assert.AreEqual(QuickAccess.RecentFiles, ex.Target);
+            Assert.AreEqual("ShowRecent", ex.ValueName);
+            Assert.IsInstanceOfType(ex.InnerException, typeof(InvalidOperationException));
         }
 
         [TestMethod]
@@ -106,6 +112,42 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void IsVisible_RegistryReadFailure_ThrowsVisibilityException()
+        {
+            var registry = new StubRegistry
+            {
+                GetValueException = new UnauthorizedAccessException("read denied")
+            };
+            var visibility = new RegistryQuickAccessVisibility(registry);
+
+            var ex = Assert.ThrowsException<QuickAccessVisibilityException>(
+                () => visibility.IsVisible(QuickAccess.FrequentFolders));
+
+            Assert.AreEqual("ReadVisibility", ex.Operation);
+            Assert.AreEqual(QuickAccess.FrequentFolders, ex.Target);
+            Assert.AreEqual("ShowFrequent", ex.ValueName);
+            Assert.AreSame(registry.GetValueException, ex.InnerException);
+        }
+
+        [TestMethod]
+        public void SetVisible_RegistryWriteFailure_ThrowsVisibilityException()
+        {
+            var registry = new StubRegistry
+            {
+                SetValueException = new UnauthorizedAccessException("write denied")
+            };
+            var visibility = new RegistryQuickAccessVisibility(registry);
+
+            var ex = Assert.ThrowsException<QuickAccessVisibilityException>(
+                () => visibility.SetVisible(QuickAccess.RecentFiles, true));
+
+            Assert.AreEqual("WriteVisibility", ex.Operation);
+            Assert.AreEqual(QuickAccess.RecentFiles, ex.Target);
+            Assert.AreEqual("ShowRecent", ex.ValueName);
+            Assert.AreSame(registry.SetValueException, ex.InnerException);
+        }
+
+        [TestMethod]
         public void InvalidTarget_ThrowsArgumentOutOfRangeException()
         {
             var visibility = new RegistryQuickAccessVisibility(new StubRegistry());
@@ -120,8 +162,15 @@ namespace TestWincent
 
             public Dictionary<string, RegistryValueKind> ValueKinds { get; } = new Dictionary<string, RegistryValueKind>();
 
+            public Exception GetValueException { get; set; }
+
+            public Exception SetValueException { get; set; }
+
             public object GetValue(string name)
             {
+                if (GetValueException != null)
+                    throw GetValueException;
+
                 object value;
                 return Values.TryGetValue(name, out value) ? value : null;
             }
@@ -134,6 +183,9 @@ namespace TestWincent
 
             public void SetDwordValue(string name, int value)
             {
+                if (SetValueException != null)
+                    throw SetValueException;
+
                 Values[name] = value;
             }
         }

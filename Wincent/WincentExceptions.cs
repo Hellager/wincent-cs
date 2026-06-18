@@ -142,6 +142,42 @@ namespace Wincent
     }
 
     /// <summary>
+    /// Represents a failure while reading or writing Quick Access visibility settings.
+    /// </summary>
+    public sealed class QuickAccessVisibilityException : WincentException
+    {
+        /// <summary>
+        /// Initializes the exception.
+        /// </summary>
+        public QuickAccessVisibilityException(
+            string operation,
+            QuickAccess target,
+            string valueName,
+            Exception innerException)
+            : base($"Quick Access visibility operation {operation} failed for {target}.", innerException)
+        {
+            Operation = operation;
+            Target = target;
+            ValueName = valueName;
+        }
+
+        /// <summary>
+        /// Gets the visibility operation name.
+        /// </summary>
+        public string Operation { get; }
+
+        /// <summary>
+        /// Gets the target section.
+        /// </summary>
+        public QuickAccess Target { get; }
+
+        /// <summary>
+        /// Gets the Explorer registry value name being processed.
+        /// </summary>
+        public string ValueName { get; }
+    }
+
+    /// <summary>
     /// Identifies a post-mutation step that failed after the requested Quick Access mutation succeeded.
     /// </summary>
     public enum QuickAccessPostMutationStep

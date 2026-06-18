@@ -1464,6 +1464,30 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void SetVisible_VisibilityFailure_PropagatesVisibilityExceptionWithoutRefresh()
+        {
+            var error = new QuickAccessVisibilityException(
+                "WriteVisibility",
+                QuickAccess.RecentFiles,
+                "ShowRecent",
+                new UnauthorizedAccessException("write denied"));
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetVisible(QuickAccess.RecentFiles, false)).Throws(error);
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            var ex = Assert.ThrowsException<QuickAccessVisibilityException>(() =>
+                _manager.SetVisible(
+                    QuickAccess.RecentFiles,
+                    false,
+                    new VisibilityOptions { RefreshExplorer = true }));
+
+            Assert.AreSame(error, ex);
+            _explorerRefresher.Verify(r => r.Refresh(It.IsAny<TimeSpan>()), Times.Never);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, It.IsAny<int>()), Times.Never);
+        }
+
+        [TestMethod]
         public void SetVisible_DefaultOptions_DoesNotRefreshExplorer()
         {
             var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
@@ -1694,6 +1718,7 @@ namespace TestWincent
                 "Wincent.QuickAccessUnlockFailure",
                 "Wincent.QuickAccessUnlockOptions",
                 "Wincent.QuickAccessUnlockReport",
+                "Wincent.QuickAccessVisibilityException",
                 "Wincent.RecentRestoreReport",
                 "Wincent.RemoveOptions",
                 "Wincent.RestoreDefaultsOptions",

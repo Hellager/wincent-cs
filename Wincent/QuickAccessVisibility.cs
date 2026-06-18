@@ -39,11 +39,11 @@ namespace Wincent
             switch (target)
             {
                 case QuickAccess.All:
-                    return IsValueVisible(ShowRecentValueName) && IsValueVisible(ShowFrequentValueName);
+                    return IsValueVisible(ShowRecentValueName, target) && IsValueVisible(ShowFrequentValueName, target);
                 case QuickAccess.RecentFiles:
-                    return IsValueVisible(ShowRecentValueName);
+                    return IsValueVisible(ShowRecentValueName, target);
                 case QuickAccess.FrequentFolders:
-                    return IsValueVisible(ShowFrequentValueName);
+                    return IsValueVisible(ShowFrequentValueName, target);
                 default:
                     throw new ArgumentOutOfRangeException(nameof(target), target, "Unsupported Quick Access target.");
             }
@@ -54,42 +54,53 @@ namespace Wincent
             switch (target)
             {
                 case QuickAccess.All:
-                    SetValueVisible(ShowRecentValueName, visible);
-                    SetValueVisible(ShowFrequentValueName, visible);
+                    SetValueVisible(ShowRecentValueName, visible, target);
+                    SetValueVisible(ShowFrequentValueName, visible, target);
                     break;
                 case QuickAccess.RecentFiles:
-                    SetValueVisible(ShowRecentValueName, visible);
+                    SetValueVisible(ShowRecentValueName, visible, target);
                     break;
                 case QuickAccess.FrequentFolders:
-                    SetValueVisible(ShowFrequentValueName, visible);
+                    SetValueVisible(ShowFrequentValueName, visible, target);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(target), target, "Unsupported Quick Access target.");
             }
         }
 
-        private bool IsValueVisible(string valueName)
+        private bool IsValueVisible(string valueName, QuickAccess target)
         {
-            object value = _registry.GetValue(valueName);
-            if (value == null)
-                return true;
-
-            RegistryValueKind? valueKind = _registry.GetValueKind(valueName);
-            switch (valueKind ?? InferValueKind(value))
+            try
             {
-                case RegistryValueKind.DWord:
-                    return Convert.ToInt32(value, CultureInfo.InvariantCulture) != 0;
-                case RegistryValueKind.QWord:
-                    return Convert.ToInt64(value, CultureInfo.InvariantCulture) != 0;
-                case RegistryValueKind.String:
-                case RegistryValueKind.ExpandString:
-                    int parsed;
-                    if (int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
-                        return parsed != 0;
+                object value = _registry.GetValue(valueName);
+                if (value == null)
+                    return true;
 
-                    throw new InvalidOperationException("Explorer visibility registry value has an unsupported string payload.");
-                default:
-                    throw new InvalidOperationException("Explorer visibility registry value has an unsupported type.");
+                RegistryValueKind? valueKind = _registry.GetValueKind(valueName);
+                switch (valueKind ?? InferValueKind(value))
+                {
+                    case RegistryValueKind.DWord:
+                        return Convert.ToInt32(value, CultureInfo.InvariantCulture) != 0;
+                    case RegistryValueKind.QWord:
+                        return Convert.ToInt64(value, CultureInfo.InvariantCulture) != 0;
+                    case RegistryValueKind.String:
+                    case RegistryValueKind.ExpandString:
+                        int parsed;
+                        if (int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
+                            return parsed != 0;
+
+                        throw new InvalidOperationException("Explorer visibility registry value has an unsupported string payload.");
+                    default:
+                        throw new InvalidOperationException("Explorer visibility registry value has an unsupported type.");
+                }
+            }
+            catch (QuickAccessVisibilityException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new QuickAccessVisibilityException("ReadVisibility", target, valueName, ex);
             }
         }
 
@@ -107,9 +118,20 @@ namespace Wincent
             throw new InvalidOperationException("Explorer visibility registry value has an unsupported type.");
         }
 
-        private void SetValueVisible(string valueName, bool visible)
+        private void SetValueVisible(string valueName, bool visible, QuickAccess target)
         {
-            _registry.SetDwordValue(valueName, visible ? 1 : 0);
+            try
+            {
+                _registry.SetDwordValue(valueName, visible ? 1 : 0);
+            }
+            catch (QuickAccessVisibilityException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new QuickAccessVisibilityException("WriteVisibility", target, valueName, ex);
+            }
         }
     }
 
