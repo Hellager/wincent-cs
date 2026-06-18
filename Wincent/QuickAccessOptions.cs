@@ -36,6 +36,14 @@ namespace Wincent
         /// convenience method.
         /// </remarks>
         public bool RefreshRecentFiles { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether Explorer windows should be refreshed after a successful add.
+        /// </summary>
+        /// <remarks>
+        /// If the add succeeds but Explorer refresh fails, <see cref="QuickAccessPostMutationException"/> is thrown.
+        /// </remarks>
+        public bool RefreshExplorer { get; set; }
     }
 
     /// <summary>
@@ -51,6 +59,14 @@ namespace Wincent
         /// whose target matches the removed item using Windows path comparison semantics.
         /// </remarks>
         public bool DeepCleanRecentLinks { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether Explorer windows should be refreshed after a successful remove.
+        /// </summary>
+        /// <remarks>
+        /// If the remove succeeds but Explorer refresh fails, <see cref="QuickAccessPostMutationException"/> is thrown.
+        /// </remarks>
+        public bool RefreshExplorer { get; set; }
     }
 
     /// <summary>
@@ -103,5 +119,10 @@ namespace Wincent
         /// Gets or sets whether Recent Files backing data should be refreshed once after a batch add.
         /// </summary>
         public bool RefreshRecentFiles { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether Explorer windows should be refreshed once after successful batch mutations.
+        /// </summary>
+        public bool RefreshExplorer { get; set; }
     }
 }

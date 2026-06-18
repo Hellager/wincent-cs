@@ -265,6 +265,47 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void AddItem_WithRefreshExplorer_RefreshesAfterSuccessfulAdd()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string>());
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+
+            _manager.AddItem(
+                @"C:\test.txt",
+                QuickAccess.RecentFiles,
+                new AddOptions { RefreshExplorer = true });
+
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ClearCache(), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItem_RefreshExplorerFailure_ThrowsPostMutationExceptionAndClearsCache()
+        {
+            var refreshError = new InvalidOperationException("refresh failed");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string>());
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(refreshError);
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+
+            var ex = Assert.ThrowsException<QuickAccessPostMutationException>(
+                () => _manager.AddItem(
+                    @"C:\Folder",
+                    QuickAccess.FrequentFolders,
+                    new AddOptions { RefreshExplorer = true }));
+
+            Assert.AreEqual(@"C:\Folder", ex.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, ex.Target);
+            Assert.AreEqual(QuickAccessPostMutationStep.RefreshExplorer, ex.Step);
+            Assert.IsInstanceOfType(ex.InnerException, typeof(PowerShellExecutionException));
+            _executor.Verify(e => e.ClearCache(), Times.Once);
+        }
+
+        [TestMethod]
         public void AddItem_FrequentFolder_UsesNativePin()
         {
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
@@ -329,6 +370,48 @@ namespace TestWincent
             _nativeMutation.Verify(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)), Times.Once);
             _recentLinksCleaner.Verify(c => c.DeleteForTarget(It.IsAny<string>(), It.IsAny<TimeSpan>()), Times.Never);
             _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Never);
+        }
+
+        [TestMethod]
+        public void RemoveItem_WithRefreshExplorer_RefreshesAfterSuccessfulRemove()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+
+            _manager.RemoveItem(
+                @"C:\test.txt",
+                QuickAccess.RecentFiles,
+                new RemoveOptions { RefreshExplorer = true });
+
+            _nativeMutation.Verify(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)), Times.Once);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ClearCache(), Times.Once);
+        }
+
+        [TestMethod]
+        public void RemoveItem_RefreshExplorerFailure_ThrowsPostMutationExceptionBeforeDeepClean()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+
+            var ex = Assert.ThrowsException<QuickAccessPostMutationException>(
+                () => _manager.RemoveItem(
+                    @"C:\test.txt",
+                    QuickAccess.RecentFiles,
+                    new RemoveOptions { RefreshExplorer = true, DeepCleanRecentLinks = true }));
+
+            Assert.AreEqual(@"C:\test.txt", ex.Path);
+            Assert.AreEqual(QuickAccess.RecentFiles, ex.Target);
+            Assert.AreEqual(QuickAccessPostMutationStep.RefreshExplorer, ex.Step);
+            _recentLinksCleaner.Verify(c => c.DeleteForTarget(It.IsAny<string>(), It.IsAny<TimeSpan>()), Times.Never);
+            _executor.Verify(e => e.ClearCache(), Times.Once);
         }
 
         [TestMethod]
@@ -764,7 +847,7 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void AddItems_RefreshFailureRecordsPerItemFailure()
+        public void AddItems_RecentBackingRefreshFailureRecordsPostMutationFailure()
         {
             var recent = QuickAccessItem.RecentFile(@"C:\recent.txt");
             var folder = QuickAccessItem.FrequentFolder(@"C:\Folder");
@@ -781,7 +864,56 @@ namespace TestWincent
             Assert.AreSame(folder, result.Succeeded[0]);
             Assert.AreEqual(1, result.Failed.Count);
             Assert.AreSame(recent, result.Failed[0].Item);
-            Assert.AreSame(refreshError, result.Failed[0].Error);
+            var error = (QuickAccessPostMutationException)result.Failed[0].Error;
+            Assert.AreEqual(recent.Path, error.Path);
+            Assert.AreEqual(QuickAccess.RecentFiles, error.Target);
+            Assert.AreEqual(QuickAccessPostMutationStep.DeleteRecentFilesBackingData, error.Step);
+            Assert.AreSame(refreshError, error.InnerException);
+        }
+
+        [TestMethod]
+        public void AddItems_WithRefreshExplorer_RefreshesOnceAfterSuccessfulAdds()
+        {
+            var recent = QuickAccessItem.RecentFile(@"C:\recent.txt");
+            var folder = QuickAccessItem.FrequentFolder(@"C:\Folder");
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+
+            var result = _manager.AddItems(
+                new[] { folder, recent },
+                new BatchOptions { RefreshExplorer = true });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(2, result.Succeeded.Count);
+            Assert.AreEqual(0, result.Failed.Count);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItems_RefreshExplorerFailureRecordsPostMutationFailure()
+        {
+            var folderA = QuickAccessItem.FrequentFolder(@"C:\FolderA");
+            var folderB = QuickAccessItem.FrequentFolder(@"C:\FolderB");
+            _nativeMutation.Setup(m => m.PinFrequentFolder(folderA.Path, TimeSpan.FromSeconds(10)));
+            _nativeMutation.Setup(m => m.PinFrequentFolder(folderB.Path, TimeSpan.FromSeconds(10)));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+
+            var result = _manager.AddItems(
+                new[] { folderA, folderB },
+                new BatchOptions { RefreshExplorer = true });
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreSame(folderB, result.Succeeded[0]);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.AreSame(folderA, result.Failed[0].Item);
+            var error = (QuickAccessPostMutationException)result.Failed[0].Error;
+            Assert.AreEqual(folderA.Path, error.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, error.Target);
+            Assert.AreEqual(QuickAccessPostMutationStep.RefreshExplorer, error.Step);
         }
 
         [TestMethod]
@@ -846,6 +978,56 @@ namespace TestWincent
             Assert.AreEqual(1, result.Failed.Count);
             Assert.AreSame(unsupported, result.Failed[0].Item);
             Assert.IsInstanceOfType(result.Failed[0].Error, typeof(UnsupportedQuickAccessOperationException));
+        }
+
+        [TestMethod]
+        public void RemoveItems_WithBatchRefreshExplorer_RefreshesOnceAndIgnoresRemoveOptionRefresh()
+        {
+            var item = QuickAccessItem.RecentFile(@"C:\test.txt");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { item.Path });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(item.Path, TimeSpan.FromSeconds(10)));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+
+            var result = _manager.RemoveItems(
+                new[] { item },
+                new BatchOptions { RefreshExplorer = true },
+                new RemoveOptions { RefreshExplorer = true });
+
+            Assert.AreEqual(1, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreEqual(0, result.Failed.Count);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
+        public void RemoveItems_RefreshExplorerFailureRecordsPostMutationFailure()
+        {
+            var one = QuickAccessItem.RecentFile(@"C:\one.txt");
+            var two = QuickAccessItem.RecentFile(@"C:\two.txt");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { one.Path, two.Path });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(one.Path, TimeSpan.FromSeconds(10)));
+            _nativeMutation.Setup(m => m.RemoveRecentFile(two.Path, TimeSpan.FromSeconds(10)));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native refresh failed"));
+            _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.RefreshExplorer, null, 10))
+                .Throws(CreatePowerShellException(PowerShellOperation.RefreshExplorer, PowerShellErrorKind.ProcessFailed, "refresh failed"));
+
+            var result = _manager.RemoveItems(
+                new[] { one, two },
+                new BatchOptions { RefreshExplorer = true },
+                new RemoveOptions());
+
+            Assert.AreEqual(2, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreSame(one, result.Succeeded[0]);
+            Assert.AreEqual(1, result.Failed.Count);
+            Assert.AreSame(two, result.Failed[0].Item);
+            var error = (QuickAccessPostMutationException)result.Failed[0].Error;
+            Assert.AreEqual(two.Path, error.Path);
+            Assert.AreEqual(QuickAccess.RecentFiles, error.Target);
+            Assert.AreEqual(QuickAccessPostMutationStep.RefreshExplorer, error.Step);
         }
 
         [TestMethod]
@@ -1180,6 +1362,8 @@ namespace TestWincent
                 "Wincent.QuickAccessManager",
                 "Wincent.QuickAccessManagerOptions",
                 "Wincent.QuickAccessOperationException",
+                "Wincent.QuickAccessPostMutationException",
+                "Wincent.QuickAccessPostMutationStep",
                 "Wincent.QuickAccessUnlockFailure",
                 "Wincent.QuickAccessUnlockOptions",
                 "Wincent.QuickAccessUnlockReport",

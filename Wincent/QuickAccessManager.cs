@@ -544,6 +544,7 @@ namespace Wincent
         /// <param name="options">The add options.</param>
         /// <exception cref="ArgumentNullException"><paramref name="path"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
         /// <exception cref="QuickAccessItemAlreadyExistsException">The item is already present.</exception>
+        /// <exception cref="QuickAccessPostMutationException">The add succeeds but a requested post-mutation step fails.</exception>
         /// <exception cref="UnsupportedQuickAccessOperationException"><paramref name="target"/> is <see cref="QuickAccess.All"/>.</exception>
         /// <remarks>
         /// This method modifies the current Windows user's Quick Access state. When
@@ -560,30 +561,43 @@ namespace Wincent
 
             EnsureSingleItemTarget(target, "AddItem");
 
-            if (target == QuickAccess.RecentFiles)
+            bool added = false;
+            try
             {
-                ValidatePath(path, PathType.File, _fileSystem);
-                if (ContainsItemExact(path, target))
-                    throw new QuickAccessItemAlreadyExistsException(path, target);
+                if (target == QuickAccess.RecentFiles)
+                {
+                    ValidatePath(path, PathType.File, _fileSystem);
+                    if (ContainsItemExact(path, target))
+                        throw new QuickAccessItemAlreadyExistsException(path, target);
 
-                AddFileToRecentDocs(path);
-                if (options.RefreshRecentFiles)
-                    _dataFiles.RemoveRecentFile();
+                    AddFileToRecentDocs(path);
+                    added = true;
+                    if (options.RefreshRecentFiles)
+                        DeleteRecentFilesBackingDataAfterMutation(path);
+                }
+                else
+                {
+                    ValidatePath(path, PathType.Directory, _fileSystem);
+                    if (ContainsItemExact(path, target))
+                        throw new QuickAccessItemAlreadyExistsException(path, target);
+
+                    ExecuteNativeMutationWithPowerShellFallback(
+                        () => _nativeMutation.PinFrequentFolder(path, _timeout),
+                        PSScript.PinToFrequentFolder,
+                        path,
+                        PowerShellOperation.PinFrequentFolder);
+                    added = true;
+                }
+
+                if (options.RefreshExplorer)
+                    RefreshExplorerAfterMutation(path, target);
             }
-            else
+            finally
             {
-                ValidatePath(path, PathType.Directory, _fileSystem);
-                if (ContainsItemExact(path, target))
-                    throw new QuickAccessItemAlreadyExistsException(path, target);
-
-                ExecuteNativeMutationWithPowerShellFallback(
-                    () => _nativeMutation.PinFrequentFolder(path, _timeout),
-                    PSScript.PinToFrequentFolder,
-                    path,
-                    PowerShellOperation.PinFrequentFolder);
+                if (added)
+                    _executor.ClearCache();
             }
 
-            _executor.ClearCache();
         }
 
         /// <summary>
@@ -604,6 +618,7 @@ namespace Wincent
         /// <param name="options">The remove options.</param>
         /// <exception cref="ArgumentNullException"><paramref name="path"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
         /// <exception cref="QuickAccessItemNotFoundException">The item is not present.</exception>
+        /// <exception cref="QuickAccessPostMutationException">The remove succeeds but a requested post-mutation step fails.</exception>
         /// <exception cref="UnsupportedQuickAccessOperationException"><paramref name="target"/> is <see cref="QuickAccess.All"/>.</exception>
         /// <remarks>
         /// This method modifies the current Windows user's Quick Access state. Removal uses native Shell verbs first
@@ -649,6 +664,8 @@ namespace Wincent
                 }
 
                 removed = true;
+                if (options.RefreshExplorer)
+                    RefreshExplorerAfterMutation(path, target);
                 if (options.DeepCleanRecentLinks)
                     _recentLinksCleaner.DeleteForTarget(path, _timeout);
             }
@@ -686,6 +703,7 @@ namespace Wincent
             var succeeded = new List<QuickAccessItem>();
             var failed = new List<BatchFailure>();
             int refreshRecentItemIndex = -1;
+            int refreshExplorerItemIndex = -1;
 
             foreach (var item in items)
             {
@@ -696,8 +714,15 @@ namespace Wincent
                 {
                     AddItem(item.Path, item.Target, new AddOptions());
                     succeeded.Add(item);
+                    int index = succeeded.Count - 1;
                     if (options.RefreshRecentFiles && item.Target == QuickAccess.RecentFiles)
-                        refreshRecentItemIndex = succeeded.Count - 1;
+                        refreshRecentItemIndex = index;
+                    if (options.RefreshExplorer)
+                        refreshExplorerItemIndex = SelectBatchRefreshItemIndex(
+                            succeeded,
+                            refreshExplorerItemIndex,
+                            item.Target,
+                            preferRecentFiles: true);
                 }
                 catch (Exception ex)
                 {
@@ -709,15 +734,23 @@ namespace Wincent
             {
                 try
                 {
-                    _dataFiles.RemoveRecentFile();
+                    var item = succeeded[refreshRecentItemIndex];
+                    DeleteRecentFilesBackingDataAfterMutation(item.Path);
                 }
                 catch (Exception ex)
                 {
                     var item = succeeded[refreshRecentItemIndex];
                     succeeded.RemoveAt(refreshRecentItemIndex);
+                    if (refreshExplorerItemIndex == refreshRecentItemIndex)
+                        refreshExplorerItemIndex = SelectLastSucceededIndex(succeeded);
+                    else if (refreshExplorerItemIndex > refreshRecentItemIndex)
+                        refreshExplorerItemIndex--;
+
                     failed.Add(new BatchFailure(item, ex));
                 }
             }
+
+            RecordBatchExplorerRefreshFailure(options.RefreshExplorer, succeeded, failed, refreshExplorerItemIndex);
 
             return new BatchResult(succeeded, failed);
         }
@@ -741,13 +774,34 @@ namespace Wincent
         /// <exception cref="ArgumentNullException"><paramref name="items"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
         public BatchResult RemoveItems(IEnumerable<QuickAccessItem> items, RemoveOptions options)
         {
+            return RemoveItems(items, new BatchOptions(), options);
+        }
+
+        /// <summary>
+        /// Removes multiple Quick Access items.
+        /// </summary>
+        /// <param name="items">The items to remove.</param>
+        /// <param name="batchOptions">The batch options.</param>
+        /// <param name="removeOptions">The remove options applied to each item.</param>
+        /// <returns>The batch result.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="items"/>, <paramref name="batchOptions"/>, or <paramref name="removeOptions"/> is <see langword="null"/>.</exception>
+        public BatchResult RemoveItems(IEnumerable<QuickAccessItem> items, BatchOptions batchOptions, RemoveOptions removeOptions)
+        {
             if (items == null)
                 throw new ArgumentNullException(nameof(items));
-            if (options == null)
-                throw new ArgumentNullException(nameof(options));
+            if (batchOptions == null)
+                throw new ArgumentNullException(nameof(batchOptions));
+            if (removeOptions == null)
+                throw new ArgumentNullException(nameof(removeOptions));
 
             var succeeded = new List<QuickAccessItem>();
             var failed = new List<BatchFailure>();
+            int refreshExplorerItemIndex = -1;
+            var perItemOptions = new RemoveOptions
+            {
+                DeepCleanRecentLinks = removeOptions.DeepCleanRecentLinks,
+                RefreshExplorer = false
+            };
 
             foreach (var item in items)
             {
@@ -756,14 +810,22 @@ namespace Wincent
 
                 try
                 {
-                    RemoveItem(item.Path, item.Target, options);
+                    RemoveItem(item.Path, item.Target, perItemOptions);
                     succeeded.Add(item);
+                    if (batchOptions.RefreshExplorer)
+                        refreshExplorerItemIndex = SelectBatchRefreshItemIndex(
+                            succeeded,
+                            refreshExplorerItemIndex,
+                            item.Target,
+                            preferRecentFiles: true);
                 }
                 catch (Exception ex)
                 {
                     failed.Add(new BatchFailure(item, ex));
                 }
             }
+
+            RecordBatchExplorerRefreshFailure(batchOptions.RefreshExplorer, succeeded, failed, refreshExplorerItemIndex);
 
             return new BatchResult(succeeded, failed);
         }
@@ -1207,6 +1269,96 @@ namespace Wincent
         {
             if (target != QuickAccess.All && target != QuickAccess.RecentFiles && target != QuickAccess.FrequentFolders)
                 throw new ArgumentOutOfRangeException(nameof(target), target, "Unsupported Quick Access target.");
+        }
+
+        private static int SelectBatchRefreshItemIndex(
+            IReadOnlyList<QuickAccessItem> succeeded,
+            int currentIndex,
+            QuickAccess target,
+            bool preferRecentFiles)
+        {
+            if (succeeded == null || succeeded.Count == 0)
+                return -1;
+
+            if (!preferRecentFiles)
+                return currentIndex < 0 ? succeeded.Count - 1 : currentIndex;
+
+            if (target == QuickAccess.RecentFiles)
+                return succeeded.Count - 1;
+
+            return currentIndex < 0 ? succeeded.Count - 1 : currentIndex;
+        }
+
+        private static int SelectLastSucceededIndex(IReadOnlyList<QuickAccessItem> succeeded)
+        {
+            return succeeded == null || succeeded.Count == 0 ? -1 : succeeded.Count - 1;
+        }
+
+        private void RecordBatchExplorerRefreshFailure(
+            bool shouldRefresh,
+            List<QuickAccessItem> succeeded,
+            List<BatchFailure> failed,
+            int refreshExplorerItemIndex)
+        {
+            if (!shouldRefresh || succeeded.Count == 0 || refreshExplorerItemIndex < 0)
+                return;
+
+            try
+            {
+                RefreshExplorer();
+            }
+            catch (Exception ex)
+            {
+                if (refreshExplorerItemIndex >= succeeded.Count)
+                    refreshExplorerItemIndex = succeeded.Count - 1;
+
+                var item = succeeded[refreshExplorerItemIndex];
+                succeeded.RemoveAt(refreshExplorerItemIndex);
+                failed.Add(new BatchFailure(
+                    item,
+                    CreatePostMutationException(
+                        item.Path,
+                        item.Target,
+                        QuickAccessPostMutationStep.RefreshExplorer,
+                        ex)));
+            }
+        }
+
+        private void DeleteRecentFilesBackingDataAfterMutation(string path)
+        {
+            try
+            {
+                _dataFiles.RemoveRecentFile();
+            }
+            catch (Exception ex)
+            {
+                throw CreatePostMutationException(
+                    path,
+                    QuickAccess.RecentFiles,
+                    QuickAccessPostMutationStep.DeleteRecentFilesBackingData,
+                    ex);
+            }
+        }
+
+        private void RefreshExplorerAfterMutation(string path, QuickAccess target)
+        {
+            try
+            {
+                RefreshExplorer();
+            }
+            catch (Exception ex)
+            {
+                throw CreatePostMutationException(path, target, QuickAccessPostMutationStep.RefreshExplorer, ex);
+            }
+        }
+
+        private static QuickAccessPostMutationException CreatePostMutationException(
+            string path,
+            QuickAccess target,
+            QuickAccessPostMutationStep step,
+            Exception innerException)
+        {
+            return new QuickAccessPostMutationException(path, target, step, innerException);
         }
 
         private IReadOnlyList<string> ExecuteListScript(PSScript script, string parameter, int timeoutSeconds)

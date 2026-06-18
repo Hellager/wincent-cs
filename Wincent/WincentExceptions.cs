@@ -142,6 +142,48 @@ namespace Wincent
     }
 
     /// <summary>
+    /// Identifies a post-mutation step that failed after the requested Quick Access mutation succeeded.
+    /// </summary>
+    public enum QuickAccessPostMutationStep
+    {
+        /// <summary>Deleting Explorer's Recent Files backing data failed.</summary>
+        DeleteRecentFilesBackingData,
+
+        /// <summary>Refreshing open Explorer windows failed.</summary>
+        RefreshExplorer
+    }
+
+    /// <summary>
+    /// Thrown when an add or remove mutation succeeds but a requested post-mutation step fails.
+    /// </summary>
+    public sealed class QuickAccessPostMutationException : WincentException
+    {
+        /// <summary>
+        /// Initializes the exception.
+        /// </summary>
+        public QuickAccessPostMutationException(
+            string path,
+            QuickAccess target,
+            QuickAccessPostMutationStep step,
+            Exception innerException)
+            : base($"Quick Access post-mutation step {step} failed for {target}: {path}", innerException)
+        {
+            Path = path;
+            Target = target;
+            Step = step;
+        }
+
+        /// <summary>Gets the path whose mutation succeeded.</summary>
+        public string Path { get; }
+
+        /// <summary>Gets the mutated Quick Access section.</summary>
+        public QuickAccess Target { get; }
+
+        /// <summary>Gets the failed post-mutation step.</summary>
+        public QuickAccessPostMutationStep Step { get; }
+    }
+
+    /// <summary>
     /// Thrown when a clear operation only partially succeeds.
     /// </summary>
     public sealed class PartialClearException : WincentException
