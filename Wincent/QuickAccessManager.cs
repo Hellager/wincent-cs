@@ -609,8 +609,7 @@ namespace Wincent
                         () => _nativeMutation.PinFrequentFolder(path, _timeout),
                         PSScript.PinToFrequentFolder,
                         path,
-                        PowerShellOperation.PinFrequentFolder,
-                        fallbackOnTimeout: false);
+                        PowerShellOperation.PinFrequentFolder);
                     added = true;
                 }
 
@@ -1430,37 +1429,40 @@ namespace Wincent
             Action nativeAction,
             PSScript fallbackScript,
             string parameter,
-            PowerShellOperation operation,
-            bool fallbackOnTimeout = true)
+            PowerShellOperation operation)
         {
             try
             {
                 nativeAction();
             }
-            catch (Exception ex) when (ShouldFallbackToPowerShell(ex, fallbackOnTimeout))
+            catch (Exception ex) when (ShouldFallbackToPowerShell(ex))
             {
                 ExecuteMutationScript(fallbackScript, parameter, operation);
             }
         }
 
-        private static bool ShouldFallbackToPowerShell(Exception exception, bool fallbackOnTimeout)
+        private static bool ShouldFallbackToPowerShell(Exception exception)
         {
-            if (!fallbackOnTimeout && exception is TimeoutException)
-            {
+            if (exception is TimeoutException)
                 return false;
-            }
 
-            if (exception is QuickAccessItemNotFoundException ||
-                exception is QuickAccessItemAlreadyExistsException ||
-                exception is UnsupportedQuickAccessOperationException ||
-                exception is ArgumentException ||
-                exception is FileNotFoundException ||
-                exception is DirectoryNotFoundException)
-            {
-                return false;
-            }
+            if (exception is COMException ||
+                exception is QuickAccessOperationException)
+                return true;
 
-            return true;
+            var invalidOperation = exception as InvalidOperationException;
+            return invalidOperation != null && IsRecoverableNativeShellFailure(invalidOperation);
+        }
+
+        private static bool IsRecoverableNativeShellFailure(InvalidOperationException exception)
+        {
+            string message = exception.Message ?? string.Empty;
+            return message.StartsWith("Failed to open shell namespace:", StringComparison.Ordinal) ||
+                   message.StartsWith("Failed to enumerate shell folder items.", StringComparison.Ordinal) ||
+                   message.StartsWith("Failed to open shell folder:", StringComparison.Ordinal) ||
+                   message.StartsWith("Failed to get shell folder self item:", StringComparison.Ordinal) ||
+                   message == "Shell.Application COM object is not available." ||
+                   message == "Native Quick Access mutation is disabled for this instance.";
         }
 
         private T ExecuteWithRetry<T>(Func<T> action)

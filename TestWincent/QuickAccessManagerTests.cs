@@ -357,7 +357,36 @@ namespace TestWincent
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string>());
             _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new COMException("Shell verb failed.", unchecked((int)0x80004005)));
+
+            _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders);
+
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void AddItem_FrequentFolder_NonRecoverableNativeFailureDoesNotFallBack()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string>());
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
                 .Throws(new InvalidOperationException("native failed"));
+
+            var ex = Assert.ThrowsException<InvalidOperationException>(
+                () => _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders));
+
+            Assert.AreEqual("native failed", ex.Message);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 10), Times.Never);
+            _executor.Verify(e => e.ClearCache(), Times.Never);
+        }
+
+        [TestMethod]
+        public void AddItem_FrequentFolder_ShellNamespaceFailureFallsBackToPowerShell()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string>());
+            _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("Failed to open shell namespace: shell:::broken"));
 
             _manager.AddItem(@"C:\Folder", QuickAccess.FrequentFolders);
 
@@ -370,7 +399,7 @@ namespace TestWincent
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string>());
             _nativeMutation.Setup(m => m.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
-                .Throws(new InvalidOperationException("native failed"));
+                .Throws(new COMException("Shell verb failed.", unchecked((int)0x80004005)));
             _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.PinToFrequentFolder, @"C:\Folder", 10))
                 .Throws(new QuickAccessItemAlreadyExistsException(@"C:\Folder", QuickAccess.FrequentFolders));
 
@@ -486,11 +515,27 @@ namespace TestWincent
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\test.txt" });
             _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)))
-                .Throws(new InvalidOperationException("native failed"));
+                .Throws(new COMException("Shell verb failed.", unchecked((int)0x80004005)));
 
             _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles);
 
             _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Once);
+        }
+
+        [TestMethod]
+        public void RemoveItem_RecentFile_NonRecoverableNativeFailureDoesNotFallBack()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .ReturnsAsync(new List<string> { @"C:\test.txt" });
+            _nativeMutation.Setup(m => m.RemoveRecentFile(@"C:\test.txt", TimeSpan.FromSeconds(10)))
+                .Throws(new InvalidOperationException("native failed"));
+
+            var ex = Assert.ThrowsException<InvalidOperationException>(
+                () => _manager.RemoveItem(@"C:\test.txt", QuickAccess.RecentFiles));
+
+            Assert.AreEqual("native failed", ex.Message);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.RemoveRecentFile, @"C:\test.txt", 10), Times.Never);
+            _executor.Verify(e => e.ClearCache(), Times.Never);
         }
 
         [TestMethod]
@@ -552,7 +597,7 @@ namespace TestWincent
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
             _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
-                .Throws(new InvalidOperationException("native failed"));
+                .Throws(new COMException("Shell verb failed.", unchecked((int)0x80004005)));
             _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
                 .Throws(CreatePowerShellException(PowerShellOperation.UnpinFrequentFolder, PowerShellErrorKind.ProcessFailed, "err"));
 
@@ -565,7 +610,7 @@ namespace TestWincent
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
             _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(10)))
-                .Throws(new InvalidOperationException("native failed"));
+                .Throws(new COMException("Shell verb failed.", unchecked((int)0x80004005)));
             _executor.Setup(e => e.ExecutePSScriptWithTimeout(PSScript.UnpinFromFrequentFolder, @"C:\Folder", 10))
                 .Throws(new QuickAccessItemNotFoundException(@"C:\Folder", QuickAccess.FrequentFolders));
 
