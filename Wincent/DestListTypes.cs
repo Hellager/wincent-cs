@@ -105,6 +105,7 @@ namespace Wincent
         internal DestList()
         {
             Entries = Array.Empty<DestListEntry>();
+            Diagnostics = Array.Empty<Diagnostic>();
         }
 
         /// <summary>Gets the DestList version.</summary>
@@ -115,6 +116,12 @@ namespace Wincent
 
         /// <summary>Gets the pinned entry count.</summary>
         public uint PinnedEntryCount { get; internal set; }
+
+        /// <summary>Gets the raw counter at DestList header offset 0x0c.</summary>
+        public uint HeaderCounterRaw { get; internal set; }
+
+        /// <summary>Gets the raw counter at DestList header offset 0x0c interpreted as a single-precision float.</summary>
+        public float HeaderCounterF32 { get; internal set; }
 
         /// <summary>Gets the last entry identifier.</summary>
         public ulong LastEntryId { get; internal set; }
@@ -131,8 +138,14 @@ namespace Wincent
         /// <summary>Gets the reserved last revision number field.</summary>
         public uint LastRevisionNumberReserved { get; internal set; }
 
+        /// <summary>Gets the add/delete action count stored at DestList header offset 0x18.</summary>
+        public ulong AddDeleteActionCount { get; internal set; }
+
         /// <summary>Gets entries.</summary>
         public IReadOnlyList<DestListEntry> Entries { get; internal set; }
+
+        /// <summary>Gets non-fatal parse diagnostics.</summary>
+        public IReadOnlyList<Diagnostic> Diagnostics { get; internal set; }
     }
 
     /// <summary>
@@ -150,11 +163,17 @@ namespace Wincent
         /// <summary>Gets the entry length.</summary>
         public int EntryLength { get; internal set; }
 
+        /// <summary>Gets the physical entry position in the DestList stream.</summary>
+        public int MruPosition { get; internal set; }
+
         /// <summary>Gets the entry identifier.</summary>
         public ulong EntryId { get; internal set; }
 
         /// <summary>Gets the entry number.</summary>
         public uint EntryNumber { get; internal set; }
+
+        /// <summary>Gets the high 32 bits of the entry identifier.</summary>
+        public uint EntryNumberUnknown { get; internal set; }
 
         /// <summary>Gets the reserved entry number field.</summary>
         public uint EntryNumberReserved { get; internal set; }
@@ -186,8 +205,17 @@ namespace Wincent
         /// <summary>Gets the access count.</summary>
         public uint AccessCount { get; internal set; }
 
+        /// <summary>Gets the compatibility alias for <see cref="AccessCount"/>.</summary>
+        public uint Count { get; internal set; }
+
         /// <summary>Gets the score.</summary>
         public float Score { get; internal set; }
+
+        /// <summary>Gets the raw Windows FILETIME value for the last access time.</summary>
+        public ulong? LastAccessFileTime { get; internal set; }
+
+        /// <summary>Gets the raw Windows FILETIME value for the last interaction time.</summary>
+        public ulong? LastInteractionFileTime { get; internal set; }
 
         /// <summary>Gets the last access time.</summary>
         public DateTimeOffset? LastAccessTime { get; internal set; }
@@ -197,6 +225,210 @@ namespace Wincent
 
         /// <summary>Gets the serialized property store size.</summary>
         public uint? SerializedPropertyStoreSize { get; internal set; }
+
+        /// <summary>Gets the reserved field at entry offset 0x78 for v3/v4/v6 entries.</summary>
+        public uint? Reserved78 { get; internal set; }
+
+        /// <summary>Gets the reserved field at entry offset 0x7c for v3/v4/v6 entries.</summary>
+        public uint? Reserved7C { get; internal set; }
+
+        /// <summary>Gets path candidates observed while resolving this entry.</summary>
+        public IReadOnlyList<PathSource> PathSources { get; internal set; } = Array.Empty<PathSource>();
+
+        /// <summary>Gets non-fatal entry-specific parse diagnostics.</summary>
+        public IReadOnlyList<Diagnostic> Warnings { get; internal set; } = Array.Empty<Diagnostic>();
+    }
+
+    /// <summary>
+    /// Severity for a non-fatal DestList parse diagnostic.
+    /// </summary>
+    public enum DiagnosticSeverity
+    {
+        /// <summary>Informational parser note.</summary>
+        Info,
+        /// <summary>Non-fatal parse issue.</summary>
+        Warning
+    }
+
+    /// <summary>
+    /// Describes a non-fatal DestList parse diagnostic.
+    /// </summary>
+    public sealed class Diagnostic
+    {
+        private Diagnostic(DiagnosticSeverity severity, string context, string message)
+        {
+            Severity = severity;
+            Context = context ?? string.Empty;
+            Message = message ?? string.Empty;
+        }
+
+        /// <summary>Gets the diagnostic severity.</summary>
+        public DiagnosticSeverity Severity { get; }
+
+        /// <summary>Gets the parser context that emitted the diagnostic.</summary>
+        public string Context { get; }
+
+        /// <summary>Gets the human-readable diagnostic message.</summary>
+        public string Message { get; }
+
+        /// <summary>Creates an informational diagnostic.</summary>
+        public static Diagnostic Info(string context, string message)
+        {
+            return new Diagnostic(DiagnosticSeverity.Info, context, message);
+        }
+
+        /// <summary>Creates a warning diagnostic.</summary>
+        public static Diagnostic Warning(string context, string message)
+        {
+            return new Diagnostic(DiagnosticSeverity.Warning, context, message);
+        }
+    }
+
+    /// <summary>
+    /// Describes a path candidate observed while resolving a DestList entry.
+    /// </summary>
+    public sealed class PathSource
+    {
+        internal PathSource(string source, string value)
+        {
+            Source = source ?? string.Empty;
+            Value = value ?? string.Empty;
+        }
+
+        /// <summary>Gets the source that produced this path candidate.</summary>
+        public string Source { get; }
+
+        /// <summary>Gets the path candidate value.</summary>
+        public string Value { get; }
+    }
+
+    /// <summary>
+    /// Explorer-oriented DestList entry helpers.
+    /// </summary>
+    public static class DestListEntries
+    {
+        /// <summary>Returns all parsed entries.</summary>
+        public static IReadOnlyList<DestListEntry> Entries(DestList destList)
+        {
+            if (destList == null)
+                throw new ArgumentNullException(nameof(destList));
+
+            return destList.Entries.ToList().AsReadOnly();
+        }
+
+        /// <summary>Returns entries likely visible in Explorer Quick Access.</summary>
+        public static IReadOnlyList<DestListEntry> QuickAccessEntries(DestList destList, int normalSlotCount)
+        {
+            if (destList == null)
+                throw new ArgumentNullException(nameof(destList));
+
+            switch (destList.Version)
+            {
+                case 4:
+                    return QuickAccessEntriesV4(destList.Entries).AsReadOnly();
+                case 6:
+                    return QuickAccessEntriesV6(destList.Entries, normalSlotCount).AsReadOnly();
+                default:
+                    return destList.Entries.ToList().AsReadOnly();
+            }
+        }
+
+        /// <summary>Returns entries likely visible in Explorer Quick Access using four normal slots.</summary>
+        public static IReadOnlyList<DestListEntry> VisibleEntries(DestList destList)
+        {
+            return QuickAccessEntries(destList, 4);
+        }
+
+        private static List<DestListEntry> QuickAccessEntriesV6(IReadOnlyList<DestListEntry> entries, int normalSlotCount)
+        {
+            var pinned = entries
+                .Where(entry => entry.PinOrder.HasValue)
+                .OrderBy(entry => entry.PinOrder ?? int.MaxValue)
+                .ToList();
+            var usedPaths = new HashSet<string>(pinned.Select(entry => VisibleEntryPathKey(entry.Path)), StringComparer.Ordinal);
+
+            var normal = entries
+                .Where(entry => !entry.PinOrder.HasValue && entry.RecentRank >= 0 && entry.RecentRank < normalSlotCount)
+                .OrderByDescending(entry => entry.RecentRank)
+                .Where(entry => usedPaths.Add(VisibleEntryPathKey(entry.Path)))
+                .ToList();
+
+            pinned.AddRange(normal);
+            return pinned;
+        }
+
+        private static List<DestListEntry> QuickAccessEntriesV4(IReadOnlyList<DestListEntry> entries)
+        {
+            return entries.Any(entry => entry.PinOrder.HasValue)
+                ? FrequentFolderEntriesV4(entries)
+                : RecentFileEntriesV4(entries);
+        }
+
+        private static List<DestListEntry> FrequentFolderEntriesV4(IReadOnlyList<DestListEntry> entries)
+        {
+            var pinned = entries
+                .Where(entry => entry.PinOrder.HasValue)
+                .OrderBy(entry => entry.PinOrder ?? int.MaxValue)
+                .ToList();
+            var usedPaths = new HashSet<string>(pinned.Select(entry => VisibleEntryPathKey(entry.Path)), StringComparer.Ordinal);
+
+            var candidates = entries
+                .Where(entry => !entry.PinOrder.HasValue && entry.AccessCount > 1 && entry.RecentRank >= 0)
+                .OrderBy(entry => entry.RecentRank)
+                .ThenByDescending(entry => entry.LastInteractionFileTime ?? 0UL)
+                .ThenByDescending(entry => entry.EntryNumber)
+                .Where(entry => usedPaths.Add(VisibleEntryPathKey(entry.Path)))
+                .Take(4)
+                .ToList();
+
+            pinned.AddRange(candidates);
+            return pinned;
+        }
+
+        private static List<DestListEntry> RecentFileEntriesV4(IReadOnlyList<DestListEntry> entries)
+        {
+            var visible = new List<DestListEntry>();
+            var usedPaths = new HashSet<string>(StringComparer.Ordinal);
+            var backingFiles = new List<DestListEntry>();
+
+            foreach (var entry in entries)
+            {
+                if (entry.AccessCount == 0)
+                    continue;
+
+                if (IsAutomaticDestinationsPath(entry.Path))
+                {
+                    backingFiles.Add(entry);
+                    continue;
+                }
+
+                if (usedPaths.Add(VisibleEntryPathKey(entry.Path)))
+                    visible.Add(entry);
+            }
+
+            var bestBackingFile = backingFiles
+                .OrderBy(entry => entry.AccessCount)
+                .ThenBy(entry => entry.LastInteractionFileTime ?? 0UL)
+                .ThenBy(entry => entry.EntryNumber)
+                .LastOrDefault();
+            if (bestBackingFile != null && usedPaths.Add(VisibleEntryPathKey(bestBackingFile.Path)))
+                visible.Add(bestBackingFile);
+
+            return visible;
+        }
+
+        private static bool IsAutomaticDestinationsPath(string path)
+        {
+            return (path ?? string.Empty).EndsWith(".automaticDestinations-ms", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string VisibleEntryPathKey(string path)
+        {
+            return (path ?? string.Empty)
+                .Replace('/', '\\')
+                .TrimEnd('\\')
+                .ToUpperInvariant();
+        }
     }
 
     /// <summary>

@@ -102,10 +102,25 @@ namespace Wincent
 
             if (destList.Length < 32)
             {
-                throw new DestListParseException(
-                    filePath,
-                    null,
-                    $"DestList stream too short: {destList.Length} bytes (minimum 32 required).");
+                return new DestList
+                {
+                    Version = 0,
+                    DeclaredEntryCount = 0,
+                    PinnedEntryCount = 0,
+                    HeaderCounterRaw = 0,
+                    HeaderCounterF32 = 0.0f,
+                    LastEntryId = 0,
+                    LastEntryNumber = 0,
+                    LastEntryNumberReserved = 0,
+                    LastRevisionNumber = 0,
+                    LastRevisionNumberReserved = 0,
+                    AddDeleteActionCount = 0,
+                    Entries = Array.Empty<DestListEntry>(),
+                    Diagnostics = new[]
+                    {
+                        Diagnostic.Warning("destlist", $"DestList stream is too small: {destList.Length} bytes")
+                    }
+                };
             }
 
             uint version = ReadUInt32(destList, 0, filePath);
@@ -113,20 +128,20 @@ namespace Wincent
                 throw new DestListUnsupportedVersionException(filePath, 0, version);
 
             int declaredEntryCount = ToInt32Safe(ReadUInt32(destList, 4, filePath), filePath, 4);
-            // Offset 8 is also exposed as LastEntryId below; keep the low 32-bit view
-            // for the legacy pinned-count field until the format mapping is tightened.
             uint pinnedEntryCount = ReadUInt32(destList, 8, filePath);
-            ulong lastEntryId = ReadUInt64(destList, 8, filePath);
-            uint lastEntryNumber = ReadUInt32(destList, 16, filePath);
-            uint lastEntryNumberReserved = ReadUInt32(destList, 20, filePath);
-            uint lastRevisionNumber = ReadUInt32(destList, 24, filePath);
-            uint lastRevisionNumberReserved = ReadUInt32(destList, 28, filePath);
+            uint headerCounterRaw = ReadUInt32(destList, 0x0c, filePath);
+            float headerCounterF32 = BitConverter.ToSingle(BitConverter.GetBytes(headerCounterRaw), 0);
+            ulong lastEntryId = ReadUInt64(destList, 0x10, filePath);
+            uint lastEntryNumber = unchecked((uint)lastEntryId);
+            uint lastEntryNumberReserved = ReadUInt32(destList, 0x14, filePath);
+            ulong addDeleteActionCount = ReadUInt64(destList, 0x18, filePath);
 
             int offset = 32;
             var entries = new List<DestListEntry>();
+            var diagnostics = new List<Diagnostic>();
             for (int i = 0; i < declaredEntryCount; i++)
             {
-                DestListEntry entry = ParseDestListEntry(cfb, destList, version, offset, filePath);
+                DestListEntry entry = ParseDestListEntry(cfb, destList, version, i, offset, filePath);
                 if (entry == null)
                 {
                     if (i == 0)
@@ -137,6 +152,9 @@ namespace Wincent
                             $"DestList truncated before first entry (declared {declaredEntryCount}).");
                     }
 
+                    diagnostics.Add(Diagnostic.Warning(
+                        "destlist.entry",
+                        $"stopped parsing at entry {i}, offset 0x{offset:x}; declared {declaredEntryCount}, parsed {entries.Count}"));
                     break;
                 }
 
@@ -149,12 +167,16 @@ namespace Wincent
                 Version = version,
                 DeclaredEntryCount = declaredEntryCount,
                 PinnedEntryCount = pinnedEntryCount,
+                HeaderCounterRaw = headerCounterRaw,
+                HeaderCounterF32 = headerCounterF32,
                 LastEntryId = lastEntryId,
                 LastEntryNumber = lastEntryNumber,
                 LastEntryNumberReserved = lastEntryNumberReserved,
-                LastRevisionNumber = lastRevisionNumber,
-                LastRevisionNumberReserved = lastRevisionNumberReserved,
-                Entries = entries
+                LastRevisionNumber = unchecked((uint)addDeleteActionCount),
+                LastRevisionNumberReserved = unchecked((uint)(addDeleteActionCount >> 32)),
+                AddDeleteActionCount = addDeleteActionCount,
+                Entries = entries.AsReadOnly(),
+                Diagnostics = diagnostics.AsReadOnly()
             };
         }
 
@@ -162,18 +184,20 @@ namespace Wincent
             CompoundFile cfb,
             byte[] destList,
             uint version,
+            int mruPosition,
             int offset,
             string filePath)
         {
             if (version == 1)
-                return ParseDestListEntryV1(cfb, destList, offset, filePath);
+                return ParseDestListEntryV1(cfb, destList, mruPosition, offset, filePath);
 
-            return ParseDestListEntryV2OrLater(cfb, destList, offset, filePath);
+            return ParseDestListEntryV2OrLater(cfb, destList, mruPosition, offset, filePath);
         }
 
         private static DestListEntry ParseDestListEntryV1(
             CompoundFile cfb,
             byte[] destList,
+            int mruPosition,
             int offset,
             string filePath)
         {
@@ -195,6 +219,7 @@ namespace Wincent
                 cfb,
                 offset,
                 pathEnd - offset,
+                mruPosition,
                 entryNumber,
                 entryNumberReserved,
                 SliceBytes(destList, pathStart, pathEnd - pathStart),
@@ -204,12 +229,15 @@ namespace Wincent
                 score,
                 lastInteractionFiletime,
                 null,
+                null,
+                null,
                 filePath);
         }
 
         private static DestListEntry ParseDestListEntryV2OrLater(
             CompoundFile cfb,
             byte[] destList,
+            int mruPosition,
             int offset,
             string filePath)
         {
@@ -223,6 +251,8 @@ namespace Wincent
             int pinStatus = ReadInt32(destList, offset + 0x6c, filePath);
             int recentRank = ReadInt32(destList, offset + 0x70, filePath);
             uint accessCount = ReadUInt32(destList, offset + 0x74, filePath);
+            uint? reserved78 = ReadOptionalUInt32(destList, offset + 0x78);
+            uint? reserved7c = ReadOptionalUInt32(destList, offset + 0x7c);
             int pathChars = checked((int)ReadUInt16(destList, offset + 0x80, filePath));
             int pathStart = offset + 0x82;
             int pathEnd = checked(pathStart + pathChars * 2);
@@ -250,6 +280,7 @@ namespace Wincent
                 cfb,
                 offset,
                 entryEnd - offset,
+                mruPosition,
                 entryNumber,
                 entryNumberReserved,
                 SliceBytes(destList, pathStart, pathEnd - pathStart),
@@ -259,6 +290,8 @@ namespace Wincent
                 score,
                 lastInteractionFiletime,
                 spsSize,
+                reserved78,
+                reserved7c,
                 filePath);
         }
 
@@ -266,6 +299,7 @@ namespace Wincent
             CompoundFile cfb,
             int entryOffset,
             int entryLength,
+            int mruPosition,
             uint entryNumber,
             uint entryNumberReserved,
             byte[] rawPathBytes,
@@ -275,50 +309,101 @@ namespace Wincent
             float score,
             ulong? lastInteractionFiletime,
             uint? spsSize,
+            uint? reserved78,
+            uint? reserved7c,
             string filePath)
         {
             string rawPath = DecodeUtf16Lossy(rawPathBytes);
             string streamName = entryNumber.ToString("x", CultureInfo.InvariantCulture);
-            string path = ResolvePath(cfb, streamName, rawPath);
+            ResolvedPath resolved = ResolvePath(cfb, streamName, rawPath);
             DateTimeOffset? lastInteractionTime = FileTimeToDateTimeOffset(lastInteractionFiletime);
 
             return new DestListEntry
             {
                 EntryOffset = entryOffset,
                 EntryLength = entryLength,
-                EntryId = entryNumber,
+                MruPosition = mruPosition,
+                EntryId = ((ulong)entryNumberReserved << 32) | entryNumber,
                 EntryNumber = entryNumber,
+                EntryNumberUnknown = entryNumberReserved,
                 EntryNumberReserved = entryNumberReserved,
                 StreamName = streamName,
                 RawPath = rawPath,
-                Path = path,
+                Path = resolved.BestPath,
                 PinStatus = pinStatus,
                 PinOrder = pinStatus >= 0 ? (int?)pinStatus : null,
                 IsPinned = pinStatus >= 0,
                 Rank = recentRank,
                 RecentRank = recentRank,
+                Count = accessCount,
                 AccessCount = accessCount,
                 Score = score,
+                LastAccessFileTime = lastInteractionFiletime,
+                LastInteractionFileTime = lastInteractionFiletime,
                 LastAccessTime = lastInteractionTime,
                 LastInteractionTime = lastInteractionTime,
-                SerializedPropertyStoreSize = spsSize
+                SerializedPropertyStoreSize = spsSize,
+                Reserved78 = reserved78,
+                Reserved7C = reserved7c,
+                PathSources = resolved.PathSources.AsReadOnly(),
+                Warnings = resolved.Warnings.AsReadOnly()
             };
         }
 
-        private static string ResolvePath(CompoundFile cfb, string streamName, string rawPath)
+        private static ResolvedPath ResolvePath(CompoundFile cfb, string streamName, string rawPath)
         {
-            if (rawPath != null && rawPath.StartsWith("knownfolder:", StringComparison.OrdinalIgnoreCase))
+            var pathSources = new List<PathSource>
             {
-                byte[] linkBytes = cfb.Stream(streamName);
-                if (linkBytes != null)
-                {
-                    string linkPath = ParseLnkLocalPath(linkBytes);
-                    if (!string.IsNullOrWhiteSpace(linkPath))
-                        return linkPath;
-                }
+                new PathSource("destlist.raw_path", rawPath)
+            };
+            var warnings = new List<Diagnostic>();
+            string safeRawPath = rawPath ?? string.Empty;
+            bool needsLinkResolution =
+                StartsWithKnownFolder(safeRawPath) ||
+                safeRawPath.StartsWith("::", StringComparison.Ordinal);
+
+            if (!needsLinkResolution)
+                return new ResolvedPath(safeRawPath, pathSources, warnings);
+
+            byte[] linkBytes = cfb.Stream(streamName);
+            if (linkBytes == null)
+            {
+                warnings.Add(Diagnostic.Warning("destlist.link", $"missing Shell Link stream `{streamName}`"));
+                warnings.Add(Diagnostic.Warning("destlist.path", $"could not resolve Shell Link path for `{safeRawPath}`"));
+                return new ResolvedPath(safeRawPath, pathSources, warnings);
             }
 
-            return rawPath ?? string.Empty;
+            string linkPath = ParseLnkLocalPath(linkBytes);
+            if (!string.IsNullOrWhiteSpace(linkPath))
+            {
+                pathSources.Add(new PathSource("lnk.linkinfo.local", linkPath));
+                return new ResolvedPath(linkPath, pathSources, warnings);
+            }
+
+            warnings.Add(Diagnostic.Warning("destlist.path", $"could not resolve Shell Link path for `{safeRawPath}`"));
+            return new ResolvedPath(safeRawPath, pathSources, warnings);
+        }
+
+        private static bool StartsWithKnownFolder(string rawPath)
+        {
+            return rawPath != null &&
+                   rawPath.StartsWith("knownfolder:", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private sealed class ResolvedPath
+        {
+            public ResolvedPath(string bestPath, List<PathSource> pathSources, List<Diagnostic> warnings)
+            {
+                BestPath = bestPath ?? string.Empty;
+                PathSources = pathSources ?? new List<PathSource>();
+                Warnings = warnings ?? new List<Diagnostic>();
+            }
+
+            public string BestPath { get; }
+
+            public List<PathSource> PathSources { get; }
+
+            public List<Diagnostic> Warnings { get; }
         }
 
         private static CfbObjectType MapObjectType(byte rawObjectType)
@@ -539,6 +624,14 @@ namespace Wincent
                 return null;
 
             return BitConverter.ToUInt64(data, offset);
+        }
+
+        private static uint? ReadOptionalUInt32(byte[] data, int offset)
+        {
+            if (offset < 0 || offset + 4 > data.Length)
+                return null;
+
+            return BitConverter.ToUInt32(data, offset);
         }
 
         private static int ToInt32Safe(ulong value, string filePath, long? offset)
