@@ -86,6 +86,15 @@ namespace Wincent
         public bool RemovePinnedFolders { get; set; }
 
         /// <summary>
+        /// Gets or sets an optional timeout for explicitly removing pinned folders.
+        /// </summary>
+        /// <remarks>
+        /// When <see cref="RemovePinnedFolders"/> is enabled, this timeout is used for the pinned-folder snapshot and
+        /// unpin sequence. A <see langword="null"/> value uses the manager timeout.
+        /// </remarks>
+        public TimeSpan? PinnedFoldersTimeout { get; set; }
+
+        /// <summary>
         /// Gets or sets whether Explorer windows should be refreshed after a successful clear.
         /// </summary>
         /// <remarks>

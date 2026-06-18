@@ -665,6 +665,61 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void ClearItems_FrequentFoldersPinnedCleanup_UsesPinnedFoldersTimeout()
+        {
+            _manager.ClearItems(
+                QuickAccess.FrequentFolders,
+                new ClearOptions
+                {
+                    RemovePinnedFolders = true,
+                    PinnedFoldersTimeout = TimeSpan.FromSeconds(3)
+                });
+
+            _executor.Verify(
+                e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 3),
+                Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_FrequentFoldersPinnedCleanup_DefaultsToManagerTimeout()
+        {
+            _manager.ClearItems(
+                QuickAccess.FrequentFolders,
+                new ClearOptions { RemovePinnedFolders = true });
+
+            _executor.Verify(
+                e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, 10),
+                Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_PinnedFoldersTimeoutZeroWithPinnedCleanup_ThrowsBeforeDoingWork()
+        {
+            Assert.ThrowsException<ArgumentOutOfRangeException>(
+                () => _manager.ClearItems(
+                    QuickAccess.FrequentFolders,
+                    new ClearOptions
+                    {
+                        RemovePinnedFolders = true,
+                        PinnedFoldersTimeout = TimeSpan.Zero
+                    }));
+
+            _fileSystem.Verify(f => f.DeleteFile(It.IsAny<string>()), Times.Never);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, It.IsAny<int>()), Times.Never);
+        }
+
+        [TestMethod]
+        public void ClearItems_PinnedFoldersTimeoutZeroWithoutPinnedCleanup_DoesNotThrow()
+        {
+            _manager.ClearItems(
+                QuickAccess.FrequentFolders,
+                new ClearOptions { PinnedFoldersTimeout = TimeSpan.Zero });
+
+            _fileSystem.Verify(f => f.DeleteFile(@"C:\frequent.automaticDestinations-ms"), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithTimeout(PSScript.EmptyPinnedFolders, null, It.IsAny<int>()), Times.Never);
+        }
+
+        [TestMethod]
         public void ClearItems_WithRefresh_UsesNativeExplorerRefresh()
         {
             _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));

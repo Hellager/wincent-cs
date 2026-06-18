@@ -857,6 +857,7 @@ namespace Wincent
                 throw new ArgumentNullException(nameof(options));
 
             EnsureClearTarget(target);
+            ValidateClearOptions(options);
 
             bool recentCleared = false;
             bool frequentCleared = false;
@@ -880,7 +881,7 @@ namespace Wincent
             {
                 try
                 {
-                    ClearFrequentFolders(options.RemovePinnedFolders);
+                    ClearFrequentFolders(options.RemovePinnedFolders, options.PinnedFoldersTimeout ?? _timeout);
                     frequentCleared = true;
                 }
                 catch (PartialClearException ex)
@@ -1271,6 +1272,18 @@ namespace Wincent
                 throw new ArgumentOutOfRangeException(nameof(target), target, "Unsupported Quick Access target.");
         }
 
+        private static void ValidateClearOptions(ClearOptions options)
+        {
+            if (options.RemovePinnedFolders &&
+                options.PinnedFoldersTimeout.HasValue &&
+                options.PinnedFoldersTimeout.Value <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(options),
+                    "PinnedFoldersTimeout must be greater than zero when RemovePinnedFolders is enabled.");
+            }
+        }
+
         private static int SelectBatchRefreshItemIndex(
             IReadOnlyList<QuickAccessItem> succeeded,
             int currentIndex,
@@ -1520,7 +1533,7 @@ namespace Wincent
                 disableOle1Dde: true);
         }
 
-        private void ClearFrequentFolders(bool removePinnedFolders)
+        private void ClearFrequentFolders(bool removePinnedFolders, TimeSpan pinnedFoldersTimeout)
         {
             var jumpListFile = _dataFiles.FrequentFoldersPath;
 
@@ -1531,7 +1544,11 @@ namespace Wincent
             {
                 try
                 {
-                    ExecuteMutationScript(PSScript.EmptyPinnedFolders, null, PowerShellOperation.ClearPinnedFolders);
+                    ExecuteMutationScript(
+                        PSScript.EmptyPinnedFolders,
+                        null,
+                        PowerShellOperation.ClearPinnedFolders,
+                        pinnedFoldersTimeout);
                 }
                 catch (Exception ex)
                 {
