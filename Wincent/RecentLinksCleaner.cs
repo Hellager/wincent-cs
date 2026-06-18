@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -68,18 +67,13 @@ namespace Wincent
 
             var deleted = new List<string>();
             string recentFolder = _recentFolder.GetPath();
-            var stopwatch = Stopwatch.StartNew();
 
             foreach (var path in _fileSystem.EnumerateFiles(recentFolder))
             {
                 if (!IsShortcutFile(path))
                     continue;
 
-                TimeSpan remaining = timeout - stopwatch.Elapsed;
-                if (remaining <= TimeSpan.Zero)
-                    throw new TimeoutException($"Recent links cleanup timed out after {timeout.TotalSeconds:0.###} seconds.");
-
-                string resolvedTarget = _resolver.ResolveTarget(path, remaining);
+                string resolvedTarget = _resolver.ResolveTarget(path, timeout);
                 if (string.IsNullOrWhiteSpace(resolvedTarget))
                     continue;
 

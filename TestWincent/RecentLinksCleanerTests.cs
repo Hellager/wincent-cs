@@ -77,7 +77,7 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void DeleteForTarget_PassesDecreasingRemainingTime()
+        public void DeleteForTarget_PassesFullTimeoutToEachResolverCall()
         {
             var fileSystem = new FakeRecentLinkFileSystem
             {
@@ -90,8 +90,7 @@ namespace TestWincent
                     [@"C:\Recent\a.lnk"] = @"C:\Work\Report.docx",
                     [@"C:\Recent\b.lnk"] = @"C:\Work\Report.docx",
                     [@"C:\Recent\c.lnk"] = @"C:\Work\Report.docx",
-                },
-                ConsumedTime = TimeSpan.FromMilliseconds(5),
+                }
             };
             var cleaner = new RecentLinksCleaner(
                 new FakeRecentFolder(@"C:\Recent"),
@@ -101,11 +100,9 @@ namespace TestWincent
             cleaner.DeleteForTarget(@"C:\Work\Report.docx", TimeSpan.FromSeconds(10));
 
             Assert.AreEqual(3, resolver.ReceivedTimeouts.Count);
-            for (int i = 1; i < resolver.ReceivedTimeouts.Count; i++)
+            foreach (var receivedTimeout in resolver.ReceivedTimeouts)
             {
-                Assert.IsTrue(
-                    resolver.ReceivedTimeouts[i] < resolver.ReceivedTimeouts[i - 1],
-                    $"Timeout at index {i} ({resolver.ReceivedTimeouts[i]}) should be less than at index {i - 1} ({resolver.ReceivedTimeouts[i - 1]})");
+                Assert.AreEqual(TimeSpan.FromSeconds(10), receivedTimeout);
             }
         }
 
@@ -137,7 +134,7 @@ namespace TestWincent
         }
 
         [TestMethod]
-        public void DeleteForTarget_ExhaustedRemainingTimeThrowsTimeoutException()
+        public void DeleteForTarget_DoesNotUseOverallStopwatchTimeout()
         {
             var fileSystem = new FakeRecentLinkFileSystem
             {
@@ -157,11 +154,15 @@ namespace TestWincent
                 resolver,
                 fileSystem);
 
-            var ex = Assert.ThrowsException<TimeoutException>(
-                () => cleaner.DeleteForTarget(@"C:\Work\Report.docx", TimeSpan.FromMilliseconds(10)));
+            var deleted = cleaner.DeleteForTarget(@"C:\Work\Report.docx", TimeSpan.FromMilliseconds(10));
 
-            Assert.IsTrue(ex.Message.Contains("timed out"), "Exception message should indicate timeout.");
-            Assert.AreEqual(1, resolver.CallCount, "Only the first link should be resolved before time is exhausted.");
+            CollectionAssert.AreEqual(
+                new[] { @"C:\Recent\a.lnk", @"C:\Recent\b.lnk" },
+                new List<string>(deleted));
+            Assert.AreEqual(2, resolver.CallCount, "Each link should get its own resolver timeout budget.");
+            CollectionAssert.AreEqual(
+                new[] { TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10) },
+                resolver.ReceivedTimeouts);
         }
 
         [TestMethod]
