@@ -56,6 +56,7 @@ namespace Wincent
             DeletedShortcutPaths = (deletedShortcutPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
             FailedShortcutDeletions = (failedShortcutDeletions ?? Enumerable.Empty<QuickAccessUnlockFailure>()).ToList().AsReadOnly();
             NewShortcutPaths = CurrentShortcutPaths.Except(InitialShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList().AsReadOnly();
+            RemainingNewShortcutPaths = NewShortcutPaths.Except(DeletedShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList().AsReadOnly();
         }
 
         /// <summary>
@@ -76,7 +77,16 @@ namespace Wincent
         /// <summary>
         /// Gets the shortcuts that appeared after the lock was acquired.
         /// </summary>
+        /// <remarks>
+        /// This is the unlock-time snapshot and can include shortcuts that were subsequently deleted during cleanup.
+        /// Use <see cref="RemainingNewShortcutPaths"/> for new shortcuts that were not successfully cleaned up.
+        /// </remarks>
         public IReadOnlyList<string> NewShortcutPaths { get; }
+
+        /// <summary>
+        /// Gets new shortcuts that were not successfully deleted during unlock cleanup.
+        /// </summary>
+        public IReadOnlyList<string> RemainingNewShortcutPaths { get; }
 
         /// <summary>
         /// Gets the shortcuts that were present in the initial snapshot but absent from the current snapshot.

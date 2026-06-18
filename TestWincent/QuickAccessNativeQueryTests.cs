@@ -64,6 +64,23 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void MergeRecentAndFrequent_DeduplicatesLargeSyntheticInputs()
+        {
+            var recent = Enumerable.Range(0, 500)
+                .Select(i => i % 2 == 0 ? @"C:\Shared" : $@"C:\Recent{i}.txt")
+                .ToList();
+            var frequent = Enumerable.Range(0, 500)
+                .Select(i => i % 2 == 0 ? @"c:/shared/" : $@"C:\Folder{i}")
+                .ToList();
+
+            var result = QuickAccessQueryMerger.MergeRecentAndFrequent(recent, frequent);
+
+            Assert.AreEqual(501, result.Count);
+            Assert.AreEqual(@"C:\Shared", result[0]);
+            Assert.AreEqual(1, result.Count(path => WindowsPathComparer.Equals(path, @"C:\Shared")));
+        }
+
+        [TestMethod]
         public void GetItems_All_MergesRecentAndFrequentFolders()
         {
             var nativeMethods = new Moq.Mock<INativeMethods>(Moq.MockBehavior.Strict);

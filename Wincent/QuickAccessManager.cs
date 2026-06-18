@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -187,21 +188,24 @@ namespace Wincent
         /// <exception cref="PowerShellExecutionException">The PowerShell fallback query fails.</exception>
         public IReadOnlyList<string> GetItems(QuickAccess target)
         {
+            return GetItemsCore(target, _timeout);
+        }
+
+        private IReadOnlyList<string> GetItemsCore(QuickAccess target, TimeSpan timeout)
+        {
             return ExecuteWithRetry(() =>
             {
                 try
                 {
-                    return _nativeQuery.GetItems(target, _timeout);
+                    return _nativeQuery.GetItems(target, timeout);
                 }
                 catch (Exception)
                 {
                     if (target == QuickAccess.All)
-                        return QuickAccessQueryMerger.MergeRecentAndFrequent(
-                            ExecuteListScript(PSScript.QueryRecentFile, null, ToTimeoutSeconds()),
-                            ExecuteListScript(PSScript.QueryFrequentFolder, null, ToTimeoutSeconds()));
+                        return ExecuteAllFallbackQuery(timeout);
 
                     var script = MapQueryScript(target);
-                    return ExecuteListScript(script, null, ToTimeoutSeconds());
+                    return ExecuteListScript(script, null, ToTimeoutSeconds(timeout));
                 }
             });
         }
@@ -1166,6 +1170,14 @@ namespace Wincent
                 .AsReadOnly();
         }
 
+        private IReadOnlyList<string> ExecuteAllFallbackQuery(TimeSpan timeout)
+        {
+            var budget = new RemainingTimeoutBudget(timeout);
+            var recent = ExecuteListScript(PSScript.QueryRecentFile, null, budget.NextTimeoutSeconds(PSScript.QueryRecentFile));
+            var frequent = ExecuteListScript(PSScript.QueryFrequentFolder, null, budget.NextTimeoutSeconds(PSScript.QueryFrequentFolder));
+            return QuickAccessQueryMerger.MergeRecentAndFrequent(recent, frequent);
+        }
+
         private void ExecuteMutationScript(PSScript script, string parameter, PowerShellOperation operation)
         {
             ExecuteMutationScript(script, parameter, operation, _timeout);
@@ -1317,6 +1329,35 @@ namespace Wincent
             return Math.Max(1, (int)Math.Ceiling(timeout.TotalSeconds));
         }
 
+        private sealed class RemainingTimeoutBudget
+        {
+            private readonly TimeSpan _timeout;
+            private readonly Stopwatch _stopwatch;
+
+            public RemainingTimeoutBudget(TimeSpan timeout)
+            {
+                _timeout = timeout;
+                _stopwatch = Stopwatch.StartNew();
+            }
+
+            public int NextTimeoutSeconds(PSScript script)
+            {
+                TimeSpan remaining = _timeout - _stopwatch.Elapsed;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    throw new PowerShellExecutionException(new PowerShellExecutionExceptionOptions
+                    {
+                        Operation = MapPowerShellOperation(script),
+                        Kind = PowerShellErrorKind.Timeout,
+                        StandardError = "Timeout: Quick Access All fallback query exceeded the operation timeout.",
+                        Duration = _stopwatch.Elapsed
+                    });
+                }
+
+                return ToTimeoutSeconds(remaining);
+            }
+        }
+
         private void AddFileToRecentDocs(string filePath)
         {
             StaThreadRunner.Run(
@@ -1358,7 +1399,7 @@ namespace Wincent
         {
             var jumpListFile = _dataFiles.FrequentFoldersPath;
             IReadOnlyList<string> pinnedSnapshot = removePinnedFolders
-                ? _nativeQuery.GetItems(QuickAccess.FrequentFolders, pinnedFoldersTimeout)
+                ? GetItemsCore(QuickAccess.FrequentFolders, pinnedFoldersTimeout)
                 : Array.Empty<string>();
 
             if (_fileSystem.FileExists(jumpListFile))

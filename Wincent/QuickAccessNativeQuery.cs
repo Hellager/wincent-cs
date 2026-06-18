@@ -193,14 +193,15 @@ namespace Wincent
             IEnumerable<string> frequentFolders)
         {
             var merged = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            AddDistinct(merged, recentFiles);
-            AddDistinct(merged, frequentFolders);
+            AddDistinct(merged, seen, recentFiles);
+            AddDistinct(merged, seen, frequentFolders);
 
             return merged.AsReadOnly();
         }
 
-        private static void AddDistinct(ICollection<string> merged, IEnumerable<string> paths)
+        private static void AddDistinct(ICollection<string> merged, ISet<string> seen, IEnumerable<string> paths)
         {
             if (paths == null)
                 return;
@@ -210,7 +211,7 @@ namespace Wincent
                 if (string.IsNullOrWhiteSpace(path))
                     continue;
 
-                if (!merged.Any(existing => WindowsPathComparer.Equals(existing, path)))
+                if (seen.Add(WindowsPathComparer.Normalize(path)))
                     merged.Add(path);
             }
         }

@@ -111,6 +111,23 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void GetItems_AllFallback_UsesSingleTimeoutBudgetAcrossRecentAndFrequentQueries()
+        {
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10))
+                .Callback(() => System.Threading.Thread.Sleep(1200))
+                .ReturnsAsync(new List<string> { @"C:\a.txt" });
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 9))
+                .ReturnsAsync(new List<string> { @"C:\folder" });
+
+            var result = _manager.GetItems(QuickAccess.All);
+
+            CollectionAssert.AreEqual(new[] { @"C:\a.txt", @"C:\folder" }, result.ToList());
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, 10), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 9), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10), Times.Never);
+        }
+
+        [TestMethod]
         public void GetItems_NativeSuccess_DoesNotUsePowerShellFallback()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
@@ -862,6 +879,31 @@ namespace TestWincent
 
             nativeQuery.Verify(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(10)), Times.Once);
             _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
+        public void ClearItems_FrequentFoldersPinnedCleanup_QueryFailureUsesPowerShellFallback()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(3)))
+                .Throws(new InvalidOperationException("Native Quick Access query is disabled for this instance."));
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 3))
+                .ReturnsAsync(new List<string> { @"C:\Pinned" });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(3)));
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object, _nativeMutation.Object);
+
+            _manager.ClearItems(
+                QuickAccess.FrequentFolders,
+                new ClearOptions
+                {
+                    RemovePinnedFolders = true,
+                    PinnedFoldersTimeout = TimeSpan.FromSeconds(3)
+                });
+
+            nativeQuery.Verify(q => q.GetItems(QuickAccess.FrequentFolders, TimeSpan.FromSeconds(3)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 3), Times.Once);
+            _nativeMutation.Verify(m => m.UnpinFrequentFolder(@"C:\Pinned", TimeSpan.FromSeconds(3)), Times.Once);
         }
 
         [TestMethod]

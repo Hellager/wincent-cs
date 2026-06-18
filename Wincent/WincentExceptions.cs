@@ -234,7 +234,6 @@ namespace Wincent
         {
             RecentFilesCleared = recentFilesCleared;
             FrequentFoldersCleared = frequentFoldersCleared;
-            SourceException = innerException;
         }
 
         /// <summary>
@@ -250,7 +249,10 @@ namespace Wincent
         /// <summary>
         /// Gets the underlying error that prevented the full clear from completing.
         /// </summary>
-        public Exception SourceException { get; }
+        /// <remarks>
+        /// This is a compatibility alias for <see cref="Exception.InnerException"/> and returns the same object.
+        /// </remarks>
+        public Exception SourceException => InnerException;
 
         /// <summary>
         /// Gets whether any Quick Access section was cleared before the failure.

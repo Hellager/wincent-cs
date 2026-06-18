@@ -134,6 +134,7 @@ namespace TestWincent
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, fileSystem.DeletedPaths);
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk", @"C:\Recent\failing.lnk" }, report.CurrentShortcutPaths.ToList());
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk", @"C:\Recent\failing.lnk" }, report.NewShortcutPaths.ToList());
+            CollectionAssert.AreEqual(new[] { @"C:\Recent\failing.lnk" }, report.RemainingNewShortcutPaths.ToList());
             CollectionAssert.AreEqual(Array.Empty<string>(), report.DisappearedShortcutPaths.ToList());
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, report.DeletedShortcutPaths.ToList());
             Assert.AreEqual(1, report.FailedShortcutDeletions.Count);
@@ -156,6 +157,7 @@ namespace TestWincent
 
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, fileSystem.DeletedPaths);
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, report.NewShortcutPaths.ToList());
+            CollectionAssert.AreEqual(Array.Empty<string>(), report.RemainingNewShortcutPaths.ToList());
             CollectionAssert.AreEqual(new[] { @"C:\Recent\gone.lnk" }, report.DisappearedShortcutPaths.ToList());
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, report.DeletedShortcutPaths.ToList());
             Assert.AreEqual(0, report.FailedShortcutDeletions.Count);
