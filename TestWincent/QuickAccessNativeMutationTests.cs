@@ -11,21 +11,27 @@ namespace TestWincent
     public class QuickAccessNativeMutationTests
     {
         [TestMethod]
-        public void UnpinFrequentFolder_UnpinnedWin10_PinsThenUnpinsFromFrequentNamespace()
+        public void UnpinFrequentFolder_UnpinnedDestListEntry_ThrowsNotFoundAndDoesNotToggle()
         {
             var shellApplication = new FakeShellApplication();
             var frequentItem = shellApplication.AddFrequentFolder(@"C:\Folder", false);
-            var mutation = CreateMutation(shellApplication, false);
+            var mutation = CreateMutation(
+                shellApplication,
+                false,
+                new StubDestListReader(CreateDestinations(new DestListEntry { Path = @"C:\Folder", IsPinned = false })));
 
-            mutation.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(5));
+            var ex = Assert.ThrowsException<QuickAccessItemNotFoundException>(
+                () => mutation.UnpinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(5)));
 
-            Assert.IsFalse(shellApplication.ContainsFrequentFolder(@"C:\Folder"));
-            CollectionAssert.AreEqual(new[] { "pintohome" }, shellApplication.SelfItem(@"C:\Folder").InvokedVerbs.ToList());
-            CollectionAssert.AreEqual(new[] { "unpinfromhome", "unpinfromhome" }, frequentItem.InvokedVerbs.ToList());
+            Assert.AreEqual(@"C:\Folder", ex.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, ex.Target);
+            Assert.IsTrue(shellApplication.ContainsFrequentFolder(@"C:\Folder"));
+            CollectionAssert.AreEqual(Array.Empty<string>(), frequentItem.InvokedVerbs.ToList());
+            CollectionAssert.AreEqual(Array.Empty<string>(), shellApplication.SelfItem(@"C:\Folder").InvokedVerbs.ToList());
         }
 
         [TestMethod]
-        public void UnpinFrequentFolder_UnpinnedWin11_TogglesSelfTwice()
+        public void UnpinFrequentFolder_UnknownPinnedStatus_KeepsLegacyWin11TogglePath()
         {
             var shellApplication = new FakeShellApplication();
             var frequentItem = shellApplication.AddFrequentFolder(@"C:\Folder", false);
@@ -83,7 +89,8 @@ namespace TestWincent
 
         private static ShellQuickAccessNativeMutation CreateMutation(
             FakeShellApplication shellApplication,
-            bool isWindows11OrLater)
+            bool isWindows11OrLater,
+            IDestListMetadataReader destListReader = null)
         {
             var nativeMethods = new Mock<INativeMethods>(MockBehavior.Strict);
             nativeMethods.Setup(n => n.CoInitializeEx(IntPtr.Zero, 2)).Returns(0);
@@ -92,8 +99,43 @@ namespace TestWincent
             return new ShellQuickAccessNativeMutation(
                 nativeMethods.Object,
                 new FakeShellApplicationFactory(shellApplication),
+                destListReader ?? new StubDestListReader(),
                 () => isWindows11OrLater,
                 TimeSpan.FromMilliseconds(1));
+        }
+
+        private static AutomaticDestinations CreateDestinations(params DestListEntry[] entries)
+        {
+            return new AutomaticDestinations(
+                new CfbInfo(512, 64, 4096, Array.Empty<CfbDirectoryEntry>()),
+                new DestList { Entries = entries });
+        }
+
+        private sealed class StubDestListReader : IDestListMetadataReader
+        {
+            private readonly AutomaticDestinations _response;
+
+            public StubDestListReader()
+            {
+            }
+
+            public StubDestListReader(AutomaticDestinations response)
+            {
+                _response = response;
+            }
+
+            public AutomaticDestinations ParseFile(string path)
+            {
+                if (_response == null)
+                    throw new InvalidOperationException("Pinned status unavailable.");
+
+                return _response;
+            }
+
+            public AutomaticDestinations ParseBytes(byte[] data)
+            {
+                throw new NotSupportedException();
+            }
         }
 
         public sealed class FakeShellApplicationFactory : IShellApplicationFactory

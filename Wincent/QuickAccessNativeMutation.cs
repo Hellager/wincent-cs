@@ -21,6 +21,7 @@ namespace Wincent
 
         private readonly INativeMethods _nativeMethods;
         private readonly IShellApplicationFactory _shellApplicationFactory;
+        private readonly IDestListMetadataReader _destListReader;
         private readonly Func<bool> _isWindows11OrLater;
         private readonly TimeSpan _verificationTimeout;
 
@@ -32,7 +33,15 @@ namespace Wincent
         internal ShellQuickAccessNativeMutation(
             INativeMethods nativeMethods,
             IShellApplicationFactory shellApplicationFactory)
-            : this(nativeMethods, shellApplicationFactory, IsWindows11OrLater)
+            : this(nativeMethods, shellApplicationFactory, new DefaultDestListMetadataReader())
+        {
+        }
+
+        internal ShellQuickAccessNativeMutation(
+            INativeMethods nativeMethods,
+            IShellApplicationFactory shellApplicationFactory,
+            IDestListMetadataReader destListReader)
+            : this(nativeMethods, shellApplicationFactory, destListReader, IsWindows11OrLater)
         {
         }
 
@@ -40,7 +49,16 @@ namespace Wincent
             INativeMethods nativeMethods,
             IShellApplicationFactory shellApplicationFactory,
             Func<bool> isWindows11OrLater)
-            : this(nativeMethods, shellApplicationFactory, isWindows11OrLater, DefaultVerificationTimeout)
+            : this(nativeMethods, shellApplicationFactory, new DefaultDestListMetadataReader(), isWindows11OrLater)
+        {
+        }
+
+        internal ShellQuickAccessNativeMutation(
+            INativeMethods nativeMethods,
+            IShellApplicationFactory shellApplicationFactory,
+            IDestListMetadataReader destListReader,
+            Func<bool> isWindows11OrLater)
+            : this(nativeMethods, shellApplicationFactory, destListReader, isWindows11OrLater, DefaultVerificationTimeout)
         {
         }
 
@@ -49,9 +67,20 @@ namespace Wincent
             IShellApplicationFactory shellApplicationFactory,
             Func<bool> isWindows11OrLater,
             TimeSpan verificationTimeout)
+            : this(nativeMethods, shellApplicationFactory, new DefaultDestListMetadataReader(), isWindows11OrLater, verificationTimeout)
+        {
+        }
+
+        internal ShellQuickAccessNativeMutation(
+            INativeMethods nativeMethods,
+            IShellApplicationFactory shellApplicationFactory,
+            IDestListMetadataReader destListReader,
+            Func<bool> isWindows11OrLater,
+            TimeSpan verificationTimeout)
         {
             _nativeMethods = nativeMethods ?? throw new ArgumentNullException(nameof(nativeMethods));
             _shellApplicationFactory = shellApplicationFactory ?? throw new ArgumentNullException(nameof(shellApplicationFactory));
+            _destListReader = destListReader ?? throw new ArgumentNullException(nameof(destListReader));
             _isWindows11OrLater = isWindows11OrLater ?? throw new ArgumentNullException(nameof(isWindows11OrLater));
             if (verificationTimeout <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(verificationTimeout), "Verification timeout must be positive.");
@@ -118,12 +147,14 @@ namespace Wincent
                     if (!ContainsFrequentFolder(path))
                         throw new QuickAccessItemNotFoundException(path, QuickAccess.FrequentFolders);
 
+                    if (GetFrequentFolderPinnedStatus(path) == FrequentFolderPinnedStatus.Unpinned)
+                        throw new QuickAccessItemNotFoundException(path, QuickAccess.FrequentFolders);
+
                     TryInvokeVerbOnFrequentFolder(path, "unpinfromhome");
                     if (WaitForFrequentFolderPresence(path, false))
                         return;
 
-                    // Unpinned frequent folders ignore unpinfromhome. Pin first, then apply the platform-specific
-                    // unpin verb so Explorer removes the item from the Frequent Folders namespace.
+                    // When DestList status is unavailable, preserve the legacy platform-specific toggle path.
                     InvokeVerbOnSelfFolder(path, "pintohome");
                     if (WaitForFrequentFolderPresence(path, false))
                         return;
@@ -145,6 +176,31 @@ namespace Wincent
         private static bool IsWindows11OrLater()
         {
             return Environment.OSVersion.Version.Build >= 22000;
+        }
+
+        private FrequentFolderPinnedStatus GetFrequentFolderPinnedStatus(string path)
+        {
+            try
+            {
+                var parsed = _destListReader.ParseFile(DestListMetadataParser.FrequentFoldersDestPath());
+                bool matched = false;
+
+                foreach (var entry in parsed.DestList.Entries)
+                {
+                    if (!WindowsPathComparer.Equals(entry.Path, path))
+                        continue;
+
+                    matched = true;
+                    if (entry.IsPinned)
+                        return FrequentFolderPinnedStatus.Pinned;
+                }
+
+                return matched ? FrequentFolderPinnedStatus.Unpinned : FrequentFolderPinnedStatus.Unknown;
+            }
+            catch (Exception)
+            {
+                return FrequentFolderPinnedStatus.Unknown;
+            }
         }
 
         private bool ContainsFrequentFolder(string path)
@@ -296,6 +352,13 @@ namespace Wincent
                     Marshal.FinalReleaseComObject(shellApplication);
             }
         }
+    }
+
+    internal enum FrequentFolderPinnedStatus
+    {
+        Pinned,
+        Unpinned,
+        Unknown
     }
 
     internal sealed class PowerShellFallbackNativeMutation : IQuickAccessNativeMutation
