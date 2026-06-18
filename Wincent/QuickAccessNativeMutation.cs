@@ -102,7 +102,7 @@ namespace Wincent
                     });
 
                     if (exists)
-                        return;
+                        throw new QuickAccessItemAlreadyExistsException(path, QuickAccess.FrequentFolders);
 
                     InvokeVerbOnSelfFolder(path, "pintohome");
                 },

@@ -55,6 +55,22 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void PinFrequentFolder_ExistingFolder_ThrowsAlreadyExistsAndDoesNotToggle()
+        {
+            var shellApplication = new FakeShellApplication();
+            shellApplication.AddFrequentFolder(@"C:\Folder", true);
+            var mutation = CreateMutation(shellApplication, true);
+
+            var ex = Assert.ThrowsException<QuickAccessItemAlreadyExistsException>(
+                () => mutation.PinFrequentFolder(@"C:\Folder", TimeSpan.FromSeconds(5)));
+
+            Assert.AreEqual(@"C:\Folder", ex.Path);
+            Assert.AreEqual(QuickAccess.FrequentFolders, ex.Target);
+            Assert.IsTrue(shellApplication.ContainsFrequentFolder(@"C:\Folder"));
+            CollectionAssert.AreEqual(Array.Empty<string>(), shellApplication.SelfItem(@"C:\Folder").InvokedVerbs.ToList());
+        }
+
+        [TestMethod]
         public void UnpinFrequentFolder_VerificationStillContainsTarget_Throws()
         {
             var shellApplication = new FakeShellApplication { IgnoreRemoveVerbs = true };
