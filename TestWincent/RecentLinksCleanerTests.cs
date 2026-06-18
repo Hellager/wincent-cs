@@ -2,6 +2,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using Wincent;
 
 namespace TestWincent
@@ -172,6 +173,100 @@ namespace TestWincent
             Assert.IsFalse(RecentLinksCleaner.IsShortcutFile(@"C:\Recent\a"));
         }
 
+        [TestMethod]
+        public void ParseShellLinkSummary_InvalidHeader_ReturnsNull()
+        {
+            Assert.IsNull(ShellLinkParser.ParseShellLinkSummary(Encoding.UTF8.GetBytes("not a link")));
+        }
+
+        [TestMethod]
+        public void ResolveBytes_RelativePathOnly_UsesRelativePathAndHeaderAttributes()
+        {
+            var lnk = MinimalLnk();
+            WriteUInt32(lnk, 0x18, FileAttributeDirectory);
+
+            var resolution = ShellLinkParser.ResolveBytes(lnk.ToArray(), TimeSpan.Zero);
+
+            Assert.IsNotNull(resolution);
+            Assert.AreEqual("relative-target", resolution.Path);
+            Assert.AreEqual(true, resolution.IsDirectory);
+        }
+
+        [TestMethod]
+        public void ParseShellLinkSummary_ReadsUnicodeLocalBaseAndSuffix()
+        {
+            var lnk = LnkWithLinkInfo(
+                localBase: @"C:\Users\Alice",
+                commonSuffix: @"Documents\report.docx",
+                networkBase: null,
+                attributes: FileAttributeArchive);
+
+            var summary = ShellLinkParser.ParseShellLinkSummary(lnk.ToArray());
+
+            Assert.IsNotNull(summary);
+            Assert.AreEqual(@"C:\Users\Alice\Documents\report.docx", summary.TargetPath);
+            Assert.AreEqual(FileAttributeArchive, summary.FileAttributes);
+            Assert.IsFalse(summary.TargetIsNetwork);
+        }
+
+        [TestMethod]
+        public void ParseShellLinkSummary_ReadsUncNetworkPath()
+        {
+            var lnk = LnkWithLinkInfo(
+                localBase: null,
+                commonSuffix: @"Share\report.docx",
+                networkBase: @"\\server\team",
+                attributes: FileAttributeArchive);
+
+            var summary = ShellLinkParser.ParseShellLinkSummary(lnk.ToArray());
+
+            Assert.IsNotNull(summary);
+            Assert.AreEqual(@"\\server\team\Share\report.docx", summary.TargetPath);
+            Assert.IsTrue(summary.TargetIsNetwork);
+        }
+
+        [TestMethod]
+        public void DetermineTargetIsDirectory_UsesAttributesWithoutMetadataProbe()
+        {
+            Assert.AreEqual(
+                true,
+                ShellLinkTargetResolver.DetermineTargetIsDirectory(
+                    @"\\server\share\folder",
+                    FileAttributeDirectory,
+                    targetIsNetwork: true,
+                    timeout: TimeSpan.Zero));
+            Assert.AreEqual(
+                false,
+                ShellLinkTargetResolver.DetermineTargetIsDirectory(
+                    @"\\server\share\file.txt",
+                    FileAttributeArchive,
+                    targetIsNetwork: true,
+                    timeout: TimeSpan.Zero));
+        }
+
+        [TestMethod]
+        public void DetermineTargetIsDirectory_LocalTarget_UsesFileSystemMetadata()
+        {
+            string directory = CreateTempDirectory();
+            try
+            {
+                string folder = Path.Combine(directory, "folder");
+                Directory.CreateDirectory(folder);
+
+                Assert.AreEqual(
+                    true,
+                    ShellLinkTargetResolver.DetermineTargetIsDirectory(
+                        folder,
+                        attributes: 0,
+                        targetIsNetwork: false,
+                        timeout: TimeSpan.Zero));
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+
         private static string CreateTempDirectory()
         {
             string path = Path.Combine(Path.GetTempPath(), "WincentRecentLinksCleanerTests", Guid.NewGuid().ToString("N"));
@@ -227,6 +322,12 @@ namespace TestWincent
 
                 return Targets.TryGetValue(shortcutPath, out var targetPath) ? targetPath : null;
             }
+
+            public ShortcutResolution Resolve(string shortcutPath, TimeSpan timeout)
+            {
+                string target = ResolveTarget(shortcutPath, timeout);
+                return target == null ? null : new ShortcutResolution(target, null);
+            }
         }
 
         private sealed class FakeRecentLinkFileSystem : IRecentLinkFileSystem
@@ -245,6 +346,119 @@ namespace TestWincent
                 if (DeleteException != null)
                     throw DeleteException;
             }
+        }
+
+        private const uint FileAttributeDirectory = 0x00000010;
+        private const uint FileAttributeArchive = 0x00000020;
+        private const uint ShellLinkHeaderSize = 0x4c;
+        private const uint HasLinkInfo = 0x00000002;
+        private const uint HasRelativePath = 0x00000008;
+        private const uint IsUnicode = 0x00000080;
+        private const uint VolumeIdAndLocalBasePath = 0x00000001;
+        private const uint CommonNetworkRelativeLinkAndPathSuffix = 0x00000002;
+
+        private static readonly byte[] LinkClsid =
+        {
+            0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
+        };
+
+        private static List<byte> MinimalLnk()
+        {
+            var lnk = new List<byte>(new byte[ShellLinkHeaderSize]);
+            WriteUInt32(lnk, 0, ShellLinkHeaderSize);
+            for (int i = 0; i < LinkClsid.Length; i++)
+                lnk[4 + i] = LinkClsid[i];
+            WriteUInt32(lnk, 0x14, HasRelativePath | IsUnicode);
+            WriteLnkString(lnk, "relative-target");
+            return lnk;
+        }
+
+        private static List<byte> LnkWithLinkInfo(string localBase, string commonSuffix, string networkBase, uint attributes)
+        {
+            var lnk = new List<byte>(new byte[ShellLinkHeaderSize]);
+            WriteUInt32(lnk, 0, ShellLinkHeaderSize);
+            for (int i = 0; i < LinkClsid.Length; i++)
+                lnk[4 + i] = LinkClsid[i];
+            WriteUInt32(lnk, 0x14, HasLinkInfo | IsUnicode);
+            WriteUInt32(lnk, 0x18, attributes);
+
+            int linkInfoStart = lnk.Count;
+            AddZeros(lnk, 0x24);
+            uint flags = 0;
+            uint localBaseOffset = 0;
+            uint networkOffset = 0;
+            uint commonSuffixOffset = 0;
+
+            if (localBase != null)
+            {
+                flags |= VolumeIdAndLocalBasePath;
+                localBaseOffset = (uint)(lnk.Count - linkInfoStart);
+                WriteUtf16Z(lnk, localBase);
+            }
+
+            if (networkBase != null)
+            {
+                flags |= CommonNetworkRelativeLinkAndPathSuffix;
+                networkOffset = (uint)(lnk.Count - linkInfoStart);
+                WriteNetworkLink(lnk, networkBase);
+            }
+
+            if (commonSuffix != null)
+            {
+                commonSuffixOffset = (uint)(lnk.Count - linkInfoStart);
+                WriteUtf16Z(lnk, commonSuffix);
+            }
+
+            uint size = (uint)(lnk.Count - linkInfoStart);
+            WriteUInt32(lnk, linkInfoStart, size);
+            WriteUInt32(lnk, linkInfoStart + 4, 0x24);
+            WriteUInt32(lnk, linkInfoStart + 8, flags);
+            WriteUInt32(lnk, linkInfoStart + 16, localBaseOffset);
+            WriteUInt32(lnk, linkInfoStart + 20, networkOffset);
+            WriteUInt32(lnk, linkInfoStart + 24, commonSuffixOffset);
+            WriteUInt32(lnk, linkInfoStart + 28, localBaseOffset);
+            WriteUInt32(lnk, linkInfoStart + 32, commonSuffixOffset);
+            return lnk;
+        }
+
+        private static void WriteNetworkLink(List<byte> data, string netName)
+        {
+            int start = data.Count;
+            AddZeros(data, 0x18);
+            uint netNameOffset = 0x18;
+            WriteUtf16Z(data, netName);
+            uint size = (uint)(data.Count - start);
+            WriteUInt32(data, start, size);
+            WriteUInt32(data, start + 8, netNameOffset);
+            WriteUInt32(data, start + 20, netNameOffset);
+        }
+
+        private static void WriteLnkString(List<byte> data, string value)
+        {
+            var words = Encoding.Unicode.GetBytes(value);
+            ushort chars = (ushort)(words.Length / 2);
+            data.AddRange(BitConverter.GetBytes(chars));
+            data.AddRange(words);
+        }
+
+        private static void WriteUtf16Z(List<byte> data, string value)
+        {
+            data.AddRange(Encoding.Unicode.GetBytes(value));
+            data.AddRange(BitConverter.GetBytes((ushort)0));
+        }
+
+        private static void WriteUInt32(List<byte> data, int offset, uint value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            for (int i = 0; i < bytes.Length; i++)
+                data[offset + i] = bytes[i];
+        }
+
+        private static void AddZeros(List<byte> data, int count)
+        {
+            for (int i = 0; i < count; i++)
+                data.Add(0);
         }
     }
 }
