@@ -493,6 +493,25 @@ namespace Wincent
         }
 
         /// <summary>
+        /// Retrieves Quick Access paths as path objects.
+        /// </summary>
+        /// <param name="target">The section to query.</param>
+        /// <returns>The current item paths.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
+        /// <exception cref="PowerShellExecutionException">The PowerShell fallback query fails.</exception>
+        /// <remarks>
+        /// The returned paths wrap Explorer's current path strings and may point to files or folders that no longer
+        /// exist.
+        /// </remarks>
+        public IReadOnlyList<QuickAccessPath> GetItemPaths(QuickAccess target)
+        {
+            return GetItems(target)
+                .Select(path => new QuickAccessPath(path))
+                .ToList()
+                .AsReadOnly();
+        }
+
+        /// <summary>
         /// Determines whether any item contains the supplied keyword.
         /// </summary>
         /// <param name="keyword">The case-sensitive substring to search for.</param>

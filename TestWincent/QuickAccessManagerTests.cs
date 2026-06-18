@@ -119,6 +119,35 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void GetItemPaths_NativeSuccess_ReturnsPathObjects()
+        {
+            var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
+            nativeQuery.Setup(n => n.GetItems(QuickAccess.RecentFiles, TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\native.txt", @"C:\missing.txt" });
+            _manager.Dispose();
+            _manager = CreateManager(nativeQuery.Object);
+
+            var result = _manager.GetItemPaths(QuickAccess.RecentFiles);
+
+            CollectionAssert.AreEqual(
+                new[] { @"C:\native.txt", @"C:\missing.txt" },
+                result.Select(path => path.FullName).ToList());
+            Assert.AreEqual(@"C:\native.txt", result[0].ToString());
+            nativeQuery.Verify(n => n.GetItems(QuickAccess.RecentFiles, TimeSpan.FromSeconds(10)), Times.Once);
+            _executor.Verify(e => e.ExecutePSScriptWithCache(PSScript.QueryRecentFile, null, It.IsAny<int>()), Times.Never);
+        }
+
+        [TestMethod]
+        public void QuickAccessPath_EqualityUsesOrdinalPathString()
+        {
+            var path = new QuickAccessPath(@"C:\Folder");
+
+            Assert.AreEqual(new QuickAccessPath(@"C:\Folder"), path);
+            Assert.AreNotEqual(new QuickAccessPath(@"c:\folder"), path);
+            Assert.AreEqual(@"C:\Folder", path.FullName);
+        }
+
+        [TestMethod]
         public void GetItems_NativeFailure_FallsBackToPowerShell()
         {
             var nativeQuery = new Mock<IQuickAccessNativeQuery>(MockBehavior.Strict);
@@ -1417,6 +1446,7 @@ namespace TestWincent
                 "Wincent.QuickAccessManager",
                 "Wincent.QuickAccessManagerOptions",
                 "Wincent.QuickAccessOperationException",
+                "Wincent.QuickAccessPath",
                 "Wincent.QuickAccessPostMutationException",
                 "Wincent.QuickAccessPostMutationStep",
                 "Wincent.QuickAccessUnlockFailure",
