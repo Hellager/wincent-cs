@@ -45,12 +45,14 @@ namespace Wincent
             string recentFolder,
             IEnumerable<string> initialShortcutPaths,
             IEnumerable<string> currentShortcutPaths,
+            IEnumerable<string> disappearedShortcutPaths,
             IEnumerable<string> deletedShortcutPaths,
             IEnumerable<QuickAccessUnlockFailure> failedShortcutDeletions)
         {
             RecentFolder = recentFolder;
             InitialShortcutPaths = (initialShortcutPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
             CurrentShortcutPaths = (currentShortcutPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
+            DisappearedShortcutPaths = (disappearedShortcutPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
             DeletedShortcutPaths = (deletedShortcutPaths ?? Enumerable.Empty<string>()).ToList().AsReadOnly();
             FailedShortcutDeletions = (failedShortcutDeletions ?? Enumerable.Empty<QuickAccessUnlockFailure>()).ToList().AsReadOnly();
             NewShortcutPaths = CurrentShortcutPaths.Except(InitialShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList().AsReadOnly();
@@ -78,6 +80,11 @@ namespace Wincent
 
         /// <summary>
         /// Gets the shortcuts that were present in the initial snapshot but absent from the current snapshot.
+        /// </summary>
+        public IReadOnlyList<string> DisappearedShortcutPaths { get; }
+
+        /// <summary>
+        /// Gets new shortcuts that were successfully deleted during unlock cleanup.
         /// </summary>
         public IReadOnlyList<string> DeletedShortcutPaths { get; }
 

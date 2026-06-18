@@ -203,7 +203,8 @@ namespace Wincent
             {
                 var currentShortcutPaths = QuickAccessShortcutSnapshot.EnumerateShortcutPaths(_fileSystem, RecentFolder);
                 var newShortcutPaths = currentShortcutPaths.Except(InitialShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList();
-                var deletedShortcutPaths = InitialShortcutPaths.Except(currentShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList();
+                var disappearedShortcutPaths = InitialShortcutPaths.Except(currentShortcutPaths, StringComparer.OrdinalIgnoreCase).ToList();
+                var deletedShortcutPaths = new List<string>();
                 var failures = new List<QuickAccessUnlockFailure>();
 
                 if (options.CleanupNewRecentLinks)
@@ -213,6 +214,7 @@ namespace Wincent
                         try
                         {
                             _fileSystem.DeleteFile(path);
+                            deletedShortcutPaths.Add(path);
                         }
                         catch (Exception ex)
                         {
@@ -225,6 +227,7 @@ namespace Wincent
                     RecentFolder,
                     InitialShortcutPaths,
                     currentShortcutPaths,
+                    disappearedShortcutPaths,
                     deletedShortcutPaths,
                     failures);
             }

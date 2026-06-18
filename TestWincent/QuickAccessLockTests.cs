@@ -109,7 +109,8 @@ namespace TestWincent
             CollectionAssert.AreEqual(new[] { @"C:\Recent\a.lnk", @"C:\Recent\b.lnk" }, report.InitialShortcutPaths.ToList());
             CollectionAssert.AreEqual(new[] { @"C:\Recent\a.lnk", @"C:\Recent\c.lnk" }, report.CurrentShortcutPaths.ToList());
             CollectionAssert.AreEqual(new[] { @"C:\Recent\c.lnk" }, report.NewShortcutPaths.ToList());
-            CollectionAssert.AreEqual(new[] { @"C:\Recent\b.lnk" }, report.DeletedShortcutPaths.ToList());
+            CollectionAssert.AreEqual(new[] { @"C:\Recent\b.lnk" }, report.DisappearedShortcutPaths.ToList());
+            CollectionAssert.AreEqual(Array.Empty<string>(), report.DeletedShortcutPaths.ToList());
         }
 
         [TestMethod]
@@ -131,9 +132,31 @@ namespace TestWincent
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, fileSystem.DeletedPaths);
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk", @"C:\Recent\failing.lnk" }, report.CurrentShortcutPaths.ToList());
             CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk", @"C:\Recent\failing.lnk" }, report.NewShortcutPaths.ToList());
+            CollectionAssert.AreEqual(Array.Empty<string>(), report.DisappearedShortcutPaths.ToList());
+            CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, report.DeletedShortcutPaths.ToList());
             Assert.AreEqual(1, report.FailedShortcutDeletions.Count);
             Assert.AreEqual(@"C:\Recent\failing.lnk", report.FailedShortcutDeletions[0].Path);
             Assert.IsInstanceOfType(report.FailedShortcutDeletions[0].Error, typeof(IOException));
+        }
+
+        [TestMethod]
+        public void Unlock_WithCleanup_ReportsDeletedShortcutsSeparatelyFromDisappearedShortcuts()
+        {
+            var fileSystem = new StubRecentLinkFileSystem(new[] { @"C:\Recent\existing.lnk", @"C:\Recent\new.lnk" });
+            var quickAccessLock = new QuickAccessLock(
+                QuickAccessLockTarget.RecentFiles,
+                @"C:\Recent",
+                new[] { @"C:\Recent\existing.lnk", @"C:\Recent\gone.lnk" },
+                new[] { new StubHandle() },
+                fileSystem);
+
+            var report = quickAccessLock.Unlock(new QuickAccessUnlockOptions { CleanupNewRecentLinks = true });
+
+            CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, fileSystem.DeletedPaths);
+            CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, report.NewShortcutPaths.ToList());
+            CollectionAssert.AreEqual(new[] { @"C:\Recent\gone.lnk" }, report.DisappearedShortcutPaths.ToList());
+            CollectionAssert.AreEqual(new[] { @"C:\Recent\new.lnk" }, report.DeletedShortcutPaths.ToList());
+            Assert.AreEqual(0, report.FailedShortcutDeletions.Count);
         }
 
         [TestMethod]
