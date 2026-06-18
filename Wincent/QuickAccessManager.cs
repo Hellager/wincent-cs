@@ -141,325 +141,31 @@ namespace Wincent
         /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentOutOfRangeException"><see cref="QuickAccessManagerOptions.Timeout"/> is not positive.</exception>
         public QuickAccessManager(QuickAccessManagerOptions options)
-            : this(
-                  new ScriptExecutor(),
-                  GetValidatedTimeout(options),
-                  new DefaultFileSystemOperations(),
-                  new DefaultNativeMethods(),
-                  new QuickAccessDataFiles(),
-                  options.RetryPolicy ?? RetryPolicy.Standard,
-                  new ShellQuickAccessNativeQuery(new DefaultNativeMethods()),
-                  new ShellQuickAccessNativeMutation(new DefaultNativeMethods()),
-                  new ShellExplorerRefresher(new DefaultNativeMethods()),
-                  new RecentLinksCleaner(
-                      new WindowsRecentFolder(new DefaultNativeMethods()),
-                      new ShellLinkTargetResolver(new DefaultNativeMethods()),
-                      new DefaultRecentLinkFileSystem()),
-                  // Tech debt: consolidate default WindowsRecentFolder/QuickAccessDataFiles construction.
-                  new QuickAccessLockFactory(
-                      new QuickAccessDataFiles(),
-                      new WindowsRecentFolder(new DefaultNativeMethods()),
-                      new DefaultRecentLinkFileSystem(),
-                      new NativeQuickAccessBackingFileHandleOpener()),
-                  new RegistryQuickAccessVisibility(new CurrentUserExplorerVisibilityRegistry()),
-                  new DefaultDestListMetadataReader(),
-                  new QuickAccessRestoreEngine(
-                      new QuickAccessDataFiles(),
-                      new WindowsRecentFolder(new DefaultNativeMethods()),
-                      new ShellLinkTargetResolver(new DefaultNativeMethods()),
-                      new DefaultRecentLinkFileSystem(),
-                      new DefaultFileSystemOperations(),
-                      new DefaultDestListMetadataReader(),
-                      new DefaultQuickAccessRestoreDelay()))
+            : this(QuickAccessManagerDependencies.CreateDefault(options))
         {
         }
 
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles)
-            // Dependency-injected instances keep the legacy PowerShell query path unless a native seam is supplied.
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  RetryPolicy.Standard,
-                  new PowerShellFallbackNativeQuery(),
-                  new PowerShellFallbackNativeMutation(),
-                  new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
+        internal QuickAccessManager(QuickAccessManagerDependencies dependencies)
         {
-        }
+            if (dependencies == null)
+                throw new ArgumentNullException(nameof(dependencies));
+            if (dependencies.Timeout <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(dependencies.Timeout), "Timeout must be positive.");
 
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  new PowerShellFallbackNativeQuery(),
-                  new PowerShellFallbackNativeMutation(),
-                  new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  nativeQuery,
-                  new PowerShellFallbackNativeMutation(),
-                  new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery,
-            IQuickAccessNativeMutation nativeMutation)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  nativeQuery,
-                  nativeMutation,
-                  new PowerShellFallbackExplorerRefresher(),
-                  new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery,
-            IQuickAccessNativeMutation nativeMutation,
-            IExplorerRefresher explorerRefresher)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  nativeQuery,
-                  nativeMutation,
-                  explorerRefresher,
-                  new NoOpRecentLinksCleaner(),
-                  new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery,
-            IQuickAccessNativeMutation nativeMutation,
-            IExplorerRefresher explorerRefresher,
-            IRecentLinksCleaner recentLinksCleaner)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  nativeQuery,
-                  nativeMutation,
-                  explorerRefresher,
-                  recentLinksCleaner,
-                  new NoOpQuickAccessLockFactory(),
-                  new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery,
-            IQuickAccessNativeMutation nativeMutation,
-            IExplorerRefresher explorerRefresher,
-            IRecentLinksCleaner recentLinksCleaner,
-            IQuickAccessLockFactory lockFactory)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  nativeQuery,
-                  nativeMutation,
-                  explorerRefresher,
-                  recentLinksCleaner,
-                  lockFactory,
-                  new NoOpQuickAccessVisibility(),
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery,
-            IQuickAccessNativeMutation nativeMutation,
-            IExplorerRefresher explorerRefresher,
-            IRecentLinksCleaner recentLinksCleaner,
-            IQuickAccessLockFactory lockFactory,
-            IQuickAccessVisibility visibility)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  nativeQuery,
-                  nativeMutation,
-                  explorerRefresher,
-                  recentLinksCleaner,
-                  lockFactory,
-                  visibility,
-                  new NoOpDestListMetadataReader(),
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery,
-            IQuickAccessNativeMutation nativeMutation,
-            IExplorerRefresher explorerRefresher,
-            IRecentLinksCleaner recentLinksCleaner,
-            IQuickAccessLockFactory lockFactory,
-            IQuickAccessVisibility visibility,
-            IDestListMetadataReader destListReader)
-            : this(
-                  executor,
-                  timeout,
-                  fileSystem,
-                  nativeMethods,
-                  dataFiles,
-                  retryPolicy,
-                  nativeQuery,
-                  nativeMutation,
-                  explorerRefresher,
-                  recentLinksCleaner,
-                  lockFactory,
-                  visibility,
-                  destListReader,
-                  new NoOpQuickAccessRestoreEngine())
-        {
-        }
-
-        internal QuickAccessManager(
-            IScriptExecutor executor,
-            TimeSpan timeout,
-            IFileSystemOperations fileSystem,
-            INativeMethods nativeMethods,
-            IQuickAccessDataFiles dataFiles,
-            RetryPolicy retryPolicy,
-            IQuickAccessNativeQuery nativeQuery,
-            IQuickAccessNativeMutation nativeMutation,
-            IExplorerRefresher explorerRefresher,
-            IRecentLinksCleaner recentLinksCleaner,
-            IQuickAccessLockFactory lockFactory,
-            IQuickAccessVisibility visibility,
-            IDestListMetadataReader destListReader,
-            IQuickAccessRestoreEngine restoreEngine)
-        {
-            if (timeout <= TimeSpan.Zero)
-                throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be positive.");
-
-            _executor = executor ?? throw new ArgumentNullException(nameof(executor));
-            _timeout = timeout;
-            _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
-            _nativeMethods = nativeMethods ?? throw new ArgumentNullException(nameof(nativeMethods));
-            _dataFiles = dataFiles ?? throw new ArgumentNullException(nameof(dataFiles));
-            _retryPolicy = retryPolicy ?? throw new ArgumentNullException(nameof(retryPolicy));
-            _nativeQuery = nativeQuery ?? throw new ArgumentNullException(nameof(nativeQuery));
-            _nativeMutation = nativeMutation ?? throw new ArgumentNullException(nameof(nativeMutation));
-            _explorerRefresher = explorerRefresher ?? throw new ArgumentNullException(nameof(explorerRefresher));
-            _recentLinksCleaner = recentLinksCleaner ?? throw new ArgumentNullException(nameof(recentLinksCleaner));
-            _lockFactory = lockFactory ?? throw new ArgumentNullException(nameof(lockFactory));
-            _visibility = visibility ?? throw new ArgumentNullException(nameof(visibility));
-            _destListReader = destListReader ?? throw new ArgumentNullException(nameof(destListReader));
-            _restoreEngine = restoreEngine ?? throw new ArgumentNullException(nameof(restoreEngine));
+            _executor = dependencies.Executor ?? throw new ArgumentNullException(nameof(dependencies.Executor));
+            _timeout = dependencies.Timeout;
+            _fileSystem = dependencies.FileSystem ?? throw new ArgumentNullException(nameof(dependencies.FileSystem));
+            _nativeMethods = dependencies.NativeMethods ?? throw new ArgumentNullException(nameof(dependencies.NativeMethods));
+            _dataFiles = dependencies.DataFiles ?? throw new ArgumentNullException(nameof(dependencies.DataFiles));
+            _retryPolicy = dependencies.RetryPolicy ?? throw new ArgumentNullException(nameof(dependencies.RetryPolicy));
+            _nativeQuery = dependencies.NativeQuery ?? throw new ArgumentNullException(nameof(dependencies.NativeQuery));
+            _nativeMutation = dependencies.NativeMutation ?? throw new ArgumentNullException(nameof(dependencies.NativeMutation));
+            _explorerRefresher = dependencies.ExplorerRefresher ?? throw new ArgumentNullException(nameof(dependencies.ExplorerRefresher));
+            _recentLinksCleaner = dependencies.RecentLinksCleaner ?? throw new ArgumentNullException(nameof(dependencies.RecentLinksCleaner));
+            _lockFactory = dependencies.LockFactory ?? throw new ArgumentNullException(nameof(dependencies.LockFactory));
+            _visibility = dependencies.Visibility ?? throw new ArgumentNullException(nameof(dependencies.Visibility));
+            _destListReader = dependencies.DestListReader ?? throw new ArgumentNullException(nameof(dependencies.DestListReader));
+            _restoreEngine = dependencies.RestoreEngine ?? throw new ArgumentNullException(nameof(dependencies.RestoreEngine));
         }
 
         /// <summary>
@@ -1292,17 +998,6 @@ namespace Wincent
 
             if (!exists)
                 throw new FileNotFoundException($"Path not found: {path}", path);
-        }
-
-        private static TimeSpan GetValidatedTimeout(QuickAccessManagerOptions options)
-        {
-            if (options == null)
-                throw new ArgumentNullException(nameof(options));
-
-            if (options.Timeout <= TimeSpan.Zero)
-                throw new ArgumentOutOfRangeException(nameof(options), "Timeout must be positive.");
-
-            return options.Timeout;
         }
 
         private static PSScript MapQueryScript(QuickAccess target)

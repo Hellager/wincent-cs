@@ -207,21 +207,16 @@ namespace TestWincent
 
         private static QuickAccessManager CreateManager(IScriptExecutor executor, IQuickAccessRestoreEngine restoreEngine)
         {
-            return new QuickAccessManager(
+            var dependencies = QuickAccessManagerDependencies.CreateTestingDefaults(
                 executor,
                 TimeSpan.FromSeconds(10),
                 new StubFileSystem(),
                 Mock.Of<INativeMethods>(),
-                new StubDataFiles(),
-                RetryPolicy.Standard,
-                new PowerShellFallbackNativeQuery(),
-                Mock.Of<IQuickAccessNativeMutation>(),
-                Mock.Of<IExplorerRefresher>(),
-                new NoOpRecentLinksCleaner(),
-                new NoOpQuickAccessLockFactory(),
-                new NoOpQuickAccessVisibility(),
-                new NoOpDestListMetadataReader(),
-                restoreEngine);
+                new StubDataFiles());
+            dependencies.NativeMutation = Mock.Of<IQuickAccessNativeMutation>();
+            dependencies.ExplorerRefresher = Mock.Of<IExplorerRefresher>();
+            dependencies.RestoreEngine = restoreEngine;
+            return new QuickAccessManager(dependencies);
         }
 
         private static AutomaticDestinations CreateDestinations(params string[] rawPaths)

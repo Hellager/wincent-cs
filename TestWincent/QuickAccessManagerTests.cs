@@ -68,17 +68,7 @@ namespace TestWincent
             _dataFiles.Setup(d => d.RecentFilesPath).Returns(@"C:\recent.automaticDestinations-ms");
             _dataFiles.Setup(d => d.FrequentFoldersPath).Returns(@"C:\frequent.automaticDestinations-ms");
 
-            _manager = new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                RetryPolicy.Standard,
-                new PowerShellFallbackNativeQuery(),
-                _nativeMutation.Object,
-                _explorerRefresher.Object,
-                _recentLinksCleaner.Object);
+            _manager = new QuickAccessManager(CreateDependencies());
         }
 
         [TestCleanup]
@@ -88,6 +78,20 @@ namespace TestWincent
         }
 
         private delegate void SHGetKnownFolderPathCallback(Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
+
+        private QuickAccessManagerDependencies CreateDependencies()
+        {
+            var dependencies = QuickAccessManagerDependencies.CreateTestingDefaults(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object);
+            dependencies.NativeMutation = _nativeMutation.Object;
+            dependencies.ExplorerRefresher = _explorerRefresher.Object;
+            dependencies.RecentLinksCleaner = _recentLinksCleaner.Object;
+            return dependencies;
+        }
 
         [TestMethod]
         public void GetItems_All_UsesMergedRecentAndFrequentFallback()
@@ -702,15 +706,10 @@ namespace TestWincent
         public void RemoveItem_TransientPowerShellFailure_RetriesAndThenSucceeds()
         {
             _manager.Dispose();
-            _manager = new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false),
-                new PowerShellFallbackNativeQuery(),
-                _nativeMutation.Object);
+            var dependencies = CreateDependencies();
+            dependencies.RetryPolicy = new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false);
+            dependencies.NativeQuery = new PowerShellFallbackNativeQuery();
+            _manager = new QuickAccessManager(dependencies);
 
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
@@ -730,13 +729,10 @@ namespace TestWincent
         public void RemoveItem_PermanentPowerShellFailure_DoesNotRetry()
         {
             _manager.Dispose();
-            _manager = new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false));
+            var dependencies = CreateDependencies();
+            dependencies.RetryPolicy = new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1.0, false);
+            dependencies.NativeMutation = new PowerShellFallbackNativeMutation();
+            _manager = new QuickAccessManager(dependencies);
 
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
@@ -753,13 +749,10 @@ namespace TestWincent
         public void RemoveItem_RetryPolicyNone_DoesNotRetryTransientFailure()
         {
             _manager.Dispose();
-            _manager = new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                RetryPolicy.None);
+            var dependencies = CreateDependencies();
+            dependencies.RetryPolicy = RetryPolicy.None;
+            dependencies.NativeMutation = new PowerShellFallbackNativeMutation();
+            _manager = new QuickAccessManager(dependencies);
 
             _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
                 .ReturnsAsync(new List<string> { @"C:\Folder" });
@@ -1807,78 +1800,45 @@ namespace TestWincent
 
         private QuickAccessManager CreateManager(IQuickAccessNativeQuery nativeQuery, RetryPolicy retryPolicy)
         {
-            return new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                retryPolicy,
-                nativeQuery);
+            var dependencies = CreateDependencies();
+            dependencies.RetryPolicy = retryPolicy;
+            dependencies.NativeQuery = nativeQuery;
+            return new QuickAccessManager(dependencies);
         }
 
         private QuickAccessManager CreateManager(IQuickAccessNativeQuery nativeQuery, IQuickAccessNativeMutation nativeMutation)
         {
-            return new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                RetryPolicy.Standard,
-                nativeQuery,
-                nativeMutation);
+            var dependencies = CreateDependencies();
+            dependencies.NativeQuery = nativeQuery;
+            dependencies.NativeMutation = nativeMutation;
+            return new QuickAccessManager(dependencies);
         }
 
         private QuickAccessManager CreateManager(IQuickAccessLockFactory lockFactory)
         {
-            return new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                RetryPolicy.Standard,
-                new PowerShellFallbackNativeQuery(),
-                _nativeMutation.Object,
-                _explorerRefresher.Object,
-                _recentLinksCleaner.Object,
-                lockFactory);
+            var dependencies = CreateDependencies();
+            dependencies.NativeQuery = new PowerShellFallbackNativeQuery();
+            dependencies.LockFactory = lockFactory;
+            return new QuickAccessManager(dependencies);
         }
 
         private QuickAccessManager CreateManager(IQuickAccessVisibility visibility)
         {
-            return new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                RetryPolicy.Standard,
-                new PowerShellFallbackNativeQuery(),
-                _nativeMutation.Object,
-                _explorerRefresher.Object,
-                _recentLinksCleaner.Object,
-                new NoOpQuickAccessLockFactory(),
-                visibility);
+            var dependencies = CreateDependencies();
+            dependencies.NativeQuery = new PowerShellFallbackNativeQuery();
+            dependencies.LockFactory = new NoOpQuickAccessLockFactory();
+            dependencies.Visibility = visibility;
+            return new QuickAccessManager(dependencies);
         }
 
         private QuickAccessManager CreateManager(IDestListMetadataReader destListReader)
         {
-            return new QuickAccessManager(
-                _executor.Object,
-                TimeSpan.FromSeconds(10),
-                _fileSystem.Object,
-                _nativeMethods.Object,
-                _dataFiles.Object,
-                RetryPolicy.Standard,
-                new PowerShellFallbackNativeQuery(),
-                _nativeMutation.Object,
-                _explorerRefresher.Object,
-                _recentLinksCleaner.Object,
-                new NoOpQuickAccessLockFactory(),
-                new NoOpQuickAccessVisibility(),
-                destListReader);
+            var dependencies = CreateDependencies();
+            dependencies.NativeQuery = new PowerShellFallbackNativeQuery();
+            dependencies.LockFactory = new NoOpQuickAccessLockFactory();
+            dependencies.Visibility = new NoOpQuickAccessVisibility();
+            dependencies.DestListReader = destListReader;
+            return new QuickAccessManager(dependencies);
         }
 
         private static AutomaticDestinations CreateDestinations(params DestListEntry[] entries)
