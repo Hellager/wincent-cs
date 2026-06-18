@@ -1046,6 +1046,26 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void RemoveItems_FrequentFoldersWithDeepClean_CleansRecentLinks()
+        {
+            var item = QuickAccessItem.FrequentFolder(@"C:\Folder");
+            _executor.Setup(e => e.ExecutePSScriptWithCache(PSScript.QueryFrequentFolder, null, 10))
+                .ReturnsAsync(new List<string> { item.Path });
+            _nativeMutation.Setup(m => m.UnpinFrequentFolder(item.Path, TimeSpan.FromSeconds(10)));
+            _recentLinksCleaner.Setup(c => c.DeleteForTarget(item.Path, TimeSpan.FromSeconds(10)))
+                .Returns(new List<string> { @"C:\Users\Test\Recent\Folder.lnk" });
+
+            var result = _manager.RemoveItems(
+                new[] { item },
+                new RemoveOptions { DeepCleanRecentLinks = true });
+
+            Assert.AreEqual(1, result.Total);
+            Assert.AreEqual(1, result.Succeeded.Count);
+            Assert.AreEqual(0, result.Failed.Count);
+            _recentLinksCleaner.Verify(c => c.DeleteForTarget(item.Path, TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
         public void RemoveItems_AllTargetRecordsFailureAndContinues()
         {
             var unsupported = new QuickAccessItem(@"C:\unsupported.txt", QuickAccess.All);

@@ -643,7 +643,7 @@ namespace Wincent
         /// This method modifies the current Windows user's Quick Access state. Removal uses native Shell verbs first
         /// and falls back to PowerShell only for native Shell failures. When
         /// <see cref="RemoveOptions.DeepCleanRecentLinks"/> is enabled, matching shortcut files in the Windows Recent
-        /// folder are deleted after the Shell removal succeeds.
+        /// folder are deleted after the Shell removal succeeds for both Recent Files and Frequent Folders.
         /// </remarks>
         public void RemoveItem(string path, QuickAccess target, RemoveOptions options)
         {

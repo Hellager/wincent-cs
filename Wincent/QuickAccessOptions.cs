@@ -56,7 +56,9 @@ namespace Wincent
         /// </summary>
         /// <remarks>
         /// The cleanup enumerates Windows Recent folder shortcuts, resolves each shortcut target, and deletes shortcuts
-        /// whose target matches the removed item using Windows path comparison semantics.
+        /// whose target matches the removed item using Windows path comparison semantics. This applies to both
+        /// <see cref="QuickAccess.RecentFiles"/> and <see cref="QuickAccess.FrequentFolders"/> removals because
+        /// frequent-folder shortcuts can also be stored in the Windows Recent folder.
         /// </remarks>
         public bool DeepCleanRecentLinks { get; set; }
 
