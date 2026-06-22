@@ -18,9 +18,9 @@ Wincent 会优先使用原生 Windows Shell API，并在需要时回退到 Power
 - 按精确路径或关键字检查项目是否存在
 - 批量添加/删除，并逐项收集错误
 - 为 Shell 操作配置超时和重试
-- 控制快速访问分区可见性
+- 控制快速访问分区和 Start Recommended 最近文档可见性
 - 锁定 backing file，并记录 Windows Recent 快捷方式快照
-- 解析 DestList 元数据
+- 解析 DestList 元数据，包括可见项辅助方法、hostname、DROID GUID 和 file DROID MAC 提取
 - 实验性通过重建删除 DestList 项
 
 ## 安装
@@ -70,6 +70,8 @@ using (var manager = new QuickAccessManager())
 - **框架**：.NET Framework 4.8。
 - **PowerShell**：回退操作需要 PowerShell。
 - **Explorer 会话**：部分 Shell namespace 和刷新操作需要交互式 Explorer 桌面会话。
+- **COM STA worker**：原生 Shell COM 操作会在后台 STA worker 上运行。超时只会停止等待结果，不能取消
+  Shell 调用；已超时的 worker 可能继续运行直到 Explorer 返回，最多同时保留 4 个活动 STA worker。
 - **一致性**：快速访问状态由 Windows Explorer 维护。修改后查询结果可能短暂滞后，Explorer 也可能异步重建 backing file。
 - **用户状态**：清空和实验性重建操作可能移除或重置快速访问状态。常用文件夹重建可能恢复默认固定文件夹：桌面、下载、文档和图片。
 
@@ -80,7 +82,7 @@ dotnet build Wincent.sln
 dotnet test Wincent.sln
 ```
 
-部分集成测试需要交互式 Explorer 桌面会话，默认会跳过。
+集成测试使用 `TestCategory("Integration")` 标记并默认跳过。它们需要交互式 Explorer 桌面会话，且可能读取或刷新当前用户的真实 Explorer 状态。
 
 ## 免责声明
 

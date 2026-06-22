@@ -122,7 +122,9 @@ namespace TestConsole
         private static void CmdFeatures()
         {
             Console.WriteLine("visible: supported");
+            Console.WriteLine("start_recommended_visibility: supported");
             Console.WriteLine("destlist: supported");
+            Console.WriteLine("destlist_droid_fields: supported");
         }
 
         private static void CmdList(QuickAccessManager manager, string[] args)
@@ -448,6 +450,25 @@ namespace TestConsole
                     manager.SetVisible(QuickAccess.FrequentFolders, ParseBool(args[2]), frequentOptions);
                     PrintVisibilityMutationResult("updated frequent visibility", QuickAccess.FrequentFolders, frequentOptions);
                     break;
+                case "get-start-recommended":
+                    Console.WriteLine(manager.IsStartRecommendedSectionVisible());
+                    break;
+                case "set-start-recommended":
+                    RequireMinArgs(args, 3, "visible set-start-recommended <true|false> [--refresh]");
+                    var startOptions = ParseVisibilityOptions(args, 3);
+                    manager.SetStartRecommendedSectionVisible(ParseBool(args[2]), startOptions);
+                    PrintStartRecommendedMutationResult("updated Start Recommended visibility", startOptions);
+                    break;
+                case "show-start-recommended":
+                    var showStartOptions = ParseVisibilityOptions(args, 2);
+                    manager.ShowStartRecommendedSection(showStartOptions);
+                    PrintStartRecommendedMutationResult("shown Start Recommended", showStartOptions);
+                    break;
+                case "hide-start-recommended":
+                    var hideStartOptions = ParseVisibilityOptions(args, 2);
+                    manager.HideStartRecommendedSection(hideStartOptions);
+                    PrintStartRecommendedMutationResult("hidden Start Recommended", hideStartOptions);
+                    break;
                 default:
                     throw new ArgumentException($"unknown visible command: {args[1]}");
             }
@@ -584,10 +605,15 @@ namespace TestConsole
                     "last_interaction={15} sps_size={16} raw_path={17} path={18}",
                     e.EntryOffset, e.EntryLength, e.EntryId, e.EntryNumber,
                     e.EntryNumberReserved, e.StreamName, e.IsPinned, e.PinStatus,
-                    e.PinOrder, e.Rank, e.RecentRank, 0, e.AccessCount, e.Score,
+                    e.PinOrder, e.Rank, e.RecentRank, e.Count, e.AccessCount, e.Score,
                     e.LastAccessTime, e.LastInteractionTime,
                     e.SerializedPropertyStoreSize,
                     e.RawPath, e.Path);
+                Console.WriteLine(
+                    "  hostname={0} volume_droid={1} file_droid={2} volume_birth_droid={3} " +
+                    "file_birth_droid={4} file_droid_mac={5}",
+                    e.Hostname, e.VolumeDroid, e.FileDroid, e.VolumeBirthDroid,
+                    e.FileBirthDroid, e.FileDroidMac);
             }
         }
 
@@ -695,9 +721,14 @@ Visible:
   visible get-recent | get-frequent
   visible set-recent <true|false> [--refresh]
   visible set-frequent <true|false> [--refresh]
+  visible get-start-recommended
+  visible set-start-recommended <true|false> [--refresh]
+  visible show-start-recommended [--refresh]
+  visible hide-start-recommended [--refresh]
 
   --refresh refreshes Explorer windows after a visible set/show/hide command.
   Frequent visibility affects only unpinned frequent folders; pinned folders stay pinned.
+  Start Recommended controls Windows recent-document tracking via Start_TrackDocs.
 
 Destlist:
   dest parse <recent|frequent> [--limit N]
@@ -907,6 +938,15 @@ Destlist:
             Console.WriteLine("explorer_refreshed: {0}", options.RefreshExplorer);
             if (target == QuickAccess.FrequentFolders || target == QuickAccess.All)
                 Console.WriteLine("note: pinned Quick Access folders are not affected by frequent visibility");
+        }
+
+        private static void PrintStartRecommendedMutationResult(
+            string message,
+            VisibilityOptions options)
+        {
+            Console.WriteLine(message);
+            Console.WriteLine("explorer_refreshed: {0}", options.RefreshExplorer);
+            Console.WriteLine("note: Start may require a refresh, restart, sign-out, or supported Windows build before the UI reflects the change");
         }
 
         private static bool ParseBool(string value)

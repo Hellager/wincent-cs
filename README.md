@@ -18,9 +18,9 @@ Wincent uses native Windows Shell APIs where available and PowerShell fallbacks 
 - Check item existence by exact path or keyword
 - Batch add/remove with per-item error collection
 - Timeout and retry controls for shell operations
-- Visibility control for Quick Access sections
+- Visibility control for Quick Access sections and Start Recommended recent documents
 - Backing file locks with Windows Recent shortcut snapshots
-- DestList metadata parsing
+- DestList metadata parsing, including visible-entry helpers, hostname, DROID GUIDs, and file DROID MAC extraction
 - Experimental rebuild-based DestList removal
 
 ## Installation
@@ -70,6 +70,9 @@ using (var manager = new QuickAccessManager())
 - **Framework**: .NET Framework 4.8.
 - **PowerShell**: Required for fallback operations.
 - **Explorer session**: Some Shell namespace and refresh operations require an interactive Explorer desktop session.
+- **COM STA workers**: Native Shell COM operations run on background STA workers. A timeout stops waiting for the
+  result but cannot cancel the Shell call; a timed-out worker may continue until Explorer returns, with at most four
+  active STA workers.
 - **Consistency**: Quick Access state is maintained by Windows Explorer. Results may lag behind mutations, and Explorer
   may rebuild backing files asynchronously.
 - **User state**: Clear and experimental rebuild operations can remove or reset Quick Access state. Frequent Folders
@@ -82,7 +85,8 @@ dotnet build Wincent.sln
 dotnet test Wincent.sln
 ```
 
-Some integration tests require an interactive Explorer desktop session and are skipped by default.
+Integration tests are marked with `TestCategory("Integration")` and skipped by default. They require an interactive
+Explorer desktop session and may read or refresh the current user's real Explorer state.
 
 ## Disclaimer
 

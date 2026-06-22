@@ -1,5 +1,25 @@
 # Changelog
 
+## [v0.2.5] - 2026-06-22
+
+### Added
+- Add Start Recommended recent-document visibility APIs backed by `Start_TrackDocs`.
+- Add Explorer Quick Access strong refresh behavior by navigating Quick Access windows to Desktop and back after refresh.
+- Add DestList entry hostname, DROID GUID, birth DROID GUID, and file DROID MAC metadata fields.
+- Add tests for STA worker cap behavior, isolated manager testing defaults, integration-test categorization, and DestList DROID metadata.
+
+### Changed
+- Update project version to 0.2.5.
+- Document STA worker limits, timeout behavior, Windows 11 Shell COM expectations, visibility side effects, and new DestList metadata fields.
+- Expand `TestConsole` with Start Recommended visibility commands and DestList DROID metadata output.
+- Harden retry policy validation through explicit `Validate()` / `Validated()` APIs.
+
+### Fixed
+- Limit active STA Shell COM workers so timed-out background workers cannot accumulate without bound.
+- Remove obsolete feasibility-check execution paths.
+- Isolate dynamic PowerShell script files by process ID to avoid cross-process cleanup and reuse hazards.
+- Improve Explorer refresh reliability for Quick Access navigation updates.
+
 ## [v0.2.4] - 2026-06-03
 
 ### Added

@@ -181,19 +181,19 @@ namespace Wincent
         /// <summary>Gets the hostname stored in the DestList entry.</summary>
         public string Hostname { get; internal set; }
 
-        /// <summary>Gets the volume DROID GUID stored in the DestList entry.</summary>
+        /// <summary>Gets the volume DROID GUID stored in the DestList entry, formatted from little-endian bytes.</summary>
         public string VolumeDroid { get; internal set; }
 
-        /// <summary>Gets the file DROID GUID stored in the DestList entry.</summary>
+        /// <summary>Gets the file DROID GUID stored in the DestList entry, formatted from little-endian bytes.</summary>
         public string FileDroid { get; internal set; }
 
-        /// <summary>Gets the volume birth DROID GUID stored in the DestList entry.</summary>
+        /// <summary>Gets the volume birth DROID GUID stored in the DestList entry, formatted from little-endian bytes.</summary>
         public string VolumeBirthDroid { get; internal set; }
 
-        /// <summary>Gets the file birth DROID GUID stored in the DestList entry.</summary>
+        /// <summary>Gets the file birth DROID GUID stored in the DestList entry, formatted from little-endian bytes.</summary>
         public string FileBirthDroid { get; internal set; }
 
-        /// <summary>Gets the MAC address encoded in the file DROID GUID.</summary>
+        /// <summary>Gets the lower-case MAC address encoded in the last six bytes of the file DROID GUID.</summary>
         public string FileDroidMac { get; internal set; }
 
         /// <summary>Gets the stream name.</summary>
