@@ -9,6 +9,9 @@ on:
 jobs:
   publish:
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
     
     steps:
     - uses: actions/checkout@v4
@@ -46,9 +49,13 @@ jobs:
         cd Wincent
         nuget pack -Properties Configuration=Release
 
+    - name: NuGet login (OIDC -> temp API key)
+      uses: NuGet/login@v1
+      id: login
+      with:
+        user: ${{ secrets.NUGET_USER }}
+
     - name: Push to NuGet
-      env:
-        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
       run: |
         $package = Get-ChildItem -Path "Wincent" -Filter "*.nupkg" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        nuget push $package.FullName $env:NUGET_API_KEY -Source https://api.nuget.org/v3/index.json
+        dotnet nuget push $package.FullName --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
