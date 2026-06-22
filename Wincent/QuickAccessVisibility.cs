@@ -9,6 +9,10 @@ namespace Wincent
         bool IsVisible(QuickAccess target);
 
         void SetVisible(QuickAccess target, bool visible);
+
+        bool IsStartRecommendedSectionVisible();
+
+        void SetStartRecommendedSectionVisible(bool visible);
     }
 
     internal interface IExplorerVisibilityRegistry
@@ -18,6 +22,12 @@ namespace Wincent
         RegistryValueKind? GetValueKind(string name);
 
         void SetDwordValue(string name, int value);
+
+        object GetAdvancedValue(string name);
+
+        RegistryValueKind? GetAdvancedValueKind(string name);
+
+        void SetAdvancedDwordValue(string name, int value);
     }
 
     internal sealed class RegistryQuickAccessVisibility : IQuickAccessVisibility
@@ -26,6 +36,7 @@ namespace Wincent
         // ShowFrequent controls automatically shown, unpinned frequent folders; pinned folders are separate.
         private const string ShowRecentValueName = "ShowRecent";
         private const string ShowFrequentValueName = "ShowFrequent";
+        private const string StartTrackDocsValueName = "Start_TrackDocs";
 
         private readonly IExplorerVisibilityRegistry _registry;
 
@@ -68,15 +79,45 @@ namespace Wincent
             }
         }
 
+        public bool IsStartRecommendedSectionVisible()
+        {
+            return IsValueVisible(
+                StartTrackDocsValueName,
+                QuickAccess.RecentFiles,
+                _registry.GetAdvancedValue,
+                _registry.GetAdvancedValueKind,
+                "ReadStartRecommendedVisibility");
+        }
+
+        public void SetStartRecommendedSectionVisible(bool visible)
+        {
+            SetValueVisible(
+                StartTrackDocsValueName,
+                visible,
+                QuickAccess.RecentFiles,
+                _registry.SetAdvancedDwordValue,
+                "WriteStartRecommendedVisibility");
+        }
+
         private bool IsValueVisible(string valueName, QuickAccess target)
+        {
+            return IsValueVisible(valueName, target, _registry.GetValue, _registry.GetValueKind, "ReadVisibility");
+        }
+
+        private bool IsValueVisible(
+            string valueName,
+            QuickAccess target,
+            Func<string, object> getValue,
+            Func<string, RegistryValueKind?> getValueKind,
+            string operation)
         {
             try
             {
-                object value = _registry.GetValue(valueName);
+                object value = getValue(valueName);
                 if (value == null)
                     return true;
 
-                RegistryValueKind? valueKind = _registry.GetValueKind(valueName);
+                RegistryValueKind? valueKind = getValueKind(valueName);
                 switch (valueKind ?? InferValueKind(value))
                 {
                     case RegistryValueKind.DWord:
@@ -100,7 +141,7 @@ namespace Wincent
             }
             catch (Exception ex)
             {
-                throw new QuickAccessVisibilityException("ReadVisibility", target, valueName, ex);
+                throw new QuickAccessVisibilityException(operation, target, valueName, ex);
             }
         }
 
@@ -120,9 +161,19 @@ namespace Wincent
 
         private void SetValueVisible(string valueName, bool visible, QuickAccess target)
         {
+            SetValueVisible(valueName, visible, target, _registry.SetDwordValue, "WriteVisibility");
+        }
+
+        private void SetValueVisible(
+            string valueName,
+            bool visible,
+            QuickAccess target,
+            Action<string, int> setDwordValue,
+            string operation)
+        {
             try
             {
-                _registry.SetDwordValue(valueName, visible ? 1 : 0);
+                setDwordValue(valueName, visible ? 1 : 0);
             }
             catch (QuickAccessVisibilityException)
             {
@@ -130,7 +181,7 @@ namespace Wincent
             }
             catch (Exception ex)
             {
-                throw new QuickAccessVisibilityException("WriteVisibility", target, valueName, ex);
+                throw new QuickAccessVisibilityException(operation, target, valueName, ex);
             }
         }
     }
@@ -138,18 +189,49 @@ namespace Wincent
     internal sealed class CurrentUserExplorerVisibilityRegistry : IExplorerVisibilityRegistry
     {
         private const string ExplorerKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer";
+        private const string ExplorerAdvancedKeyPath = ExplorerKeyPath + @"\Advanced";
 
         public object GetValue(string name)
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(ExplorerKeyPath, writable: false))
+            return GetValue(ExplorerKeyPath, name);
+        }
+
+        public RegistryValueKind? GetValueKind(string name)
+        {
+            return GetValueKind(ExplorerKeyPath, name);
+        }
+
+        public void SetDwordValue(string name, int value)
+        {
+            SetDwordValue(ExplorerKeyPath, name, value);
+        }
+
+        public object GetAdvancedValue(string name)
+        {
+            return GetValue(ExplorerAdvancedKeyPath, name);
+        }
+
+        public RegistryValueKind? GetAdvancedValueKind(string name)
+        {
+            return GetValueKind(ExplorerAdvancedKeyPath, name);
+        }
+
+        public void SetAdvancedDwordValue(string name, int value)
+        {
+            SetDwordValue(ExplorerAdvancedKeyPath, name, value);
+        }
+
+        private static object GetValue(string keyPath, string name)
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(keyPath, writable: false))
             {
                 return key?.GetValue(name);
             }
         }
 
-        public RegistryValueKind? GetValueKind(string name)
+        private static RegistryValueKind? GetValueKind(string keyPath, string name)
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(ExplorerKeyPath, writable: false))
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(keyPath, writable: false))
             {
                 if (key == null || Array.IndexOf(key.GetValueNames(), name) < 0)
                     return null;
@@ -158,9 +240,9 @@ namespace Wincent
             }
         }
 
-        public void SetDwordValue(string name, int value)
+        private static void SetDwordValue(string keyPath, string name, int value)
         {
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(ExplorerKeyPath))
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(keyPath))
             {
                 if (key == null)
                     throw new InvalidOperationException("Unable to open Explorer registry key.");
@@ -178,6 +260,15 @@ namespace Wincent
         }
 
         public void SetVisible(QuickAccess target, bool visible)
+        {
+        }
+
+        public bool IsStartRecommendedSectionVisible()
+        {
+            return true;
+        }
+
+        public void SetStartRecommendedSectionVisible(bool visible)
         {
         }
     }

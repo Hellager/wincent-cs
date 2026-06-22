@@ -940,6 +940,104 @@ namespace Wincent
         }
 
         /// <summary>
+        /// Gets whether recently used files appear in Windows Recommended items.
+        /// </summary>
+        /// <returns><see langword="true"/> when Start Recommended document tracking is enabled.</returns>
+        /// <remarks>
+        /// This method reads the current Windows user's
+        /// <c>HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\Start_TrackDocs</c> value.
+        /// Missing registry values are treated as visible. Policy values, MDM settings, Windows edition, or Explorer
+        /// version can still affect the effective Start menu UI state.
+        /// </remarks>
+        /// <seealso cref="SetStartRecommendedSectionVisible(bool)"/>
+        public bool IsStartRecommendedSectionVisible()
+        {
+            return _visibility.IsStartRecommendedSectionVisible();
+        }
+
+        /// <summary>
+        /// Sets whether recently used files appear in Windows Recommended items.
+        /// </summary>
+        /// <param name="visible">Whether recently used files should appear in Windows Recommended items.</param>
+        /// <remarks>
+        /// Passing <see langword="true"/> writes <c>Start_TrackDocs = 1</c>; passing <see langword="false"/> writes
+        /// <c>Start_TrackDocs = 0</c>. This method does not refresh Explorer windows.
+        /// </remarks>
+        /// <seealso cref="SetStartRecommendedSectionVisible(bool, VisibilityOptions)"/>
+        public void SetStartRecommendedSectionVisible(bool visible)
+        {
+            SetStartRecommendedSectionVisible(visible, new VisibilityOptions());
+        }
+
+        /// <summary>
+        /// Sets whether recently used files appear in Windows Recommended items.
+        /// </summary>
+        /// <param name="visible">Whether recently used files should appear in Windows Recommended items.</param>
+        /// <param name="options">The visibility options.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <remarks>
+        /// When <see cref="VisibilityOptions.RefreshExplorer"/> is enabled, Explorer windows are refreshed after the
+        /// registry write. If refresh fails after both native Shell refresh and PowerShell fallback, the refresh failure
+        /// is propagated and the registry write is not rolled back.
+        /// </remarks>
+        /// <seealso cref="IsStartRecommendedSectionVisible"/>
+        public void SetStartRecommendedSectionVisible(bool visible, VisibilityOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
+            _visibility.SetStartRecommendedSectionVisible(visible);
+            if (options.RefreshExplorer)
+                RefreshExplorer();
+        }
+
+        /// <summary>
+        /// Shows recently used files in Windows Recommended items.
+        /// </summary>
+        /// <remarks>This is a convenience wrapper for <see cref="SetStartRecommendedSectionVisible(bool)"/>.</remarks>
+        public void ShowStartRecommendedSection()
+        {
+            ShowStartRecommendedSection(new VisibilityOptions());
+        }
+
+        /// <summary>
+        /// Shows recently used files in Windows Recommended items.
+        /// </summary>
+        /// <param name="options">The visibility options.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <remarks>
+        /// This is a convenience wrapper for
+        /// <see cref="SetStartRecommendedSectionVisible(bool, VisibilityOptions)"/>.
+        /// </remarks>
+        public void ShowStartRecommendedSection(VisibilityOptions options)
+        {
+            SetStartRecommendedSectionVisible(true, options);
+        }
+
+        /// <summary>
+        /// Hides recently used files from Windows Recommended items.
+        /// </summary>
+        /// <remarks>This is a convenience wrapper for <see cref="SetStartRecommendedSectionVisible(bool)"/>.</remarks>
+        public void HideStartRecommendedSection()
+        {
+            HideStartRecommendedSection(new VisibilityOptions());
+        }
+
+        /// <summary>
+        /// Hides recently used files from Windows Recommended items.
+        /// </summary>
+        /// <param name="options">The visibility options.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <remarks>
+        /// This is a convenience wrapper for
+        /// <see cref="SetStartRecommendedSectionVisible(bool, VisibilityOptions)"/>.
+        /// </remarks>
+        public void HideStartRecommendedSection(VisibilityOptions options)
+        {
+            SetStartRecommendedSectionVisible(false, options);
+        }
+
+        /// <summary>
         /// Parses Recent Files DestList metadata.
         /// </summary>
         /// <returns>The Recent Files DestList entries.</returns>

@@ -1706,6 +1706,87 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void IsStartRecommendedSectionVisible_DelegatesToVisibilityService()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.IsStartRecommendedSectionVisible()).Returns(false);
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            var result = _manager.IsStartRecommendedSectionVisible();
+
+            Assert.IsFalse(result);
+            visibility.Verify(v => v.IsStartRecommendedSectionVisible(), Times.Once);
+        }
+
+        [TestMethod]
+        public void SetStartRecommendedSectionVisible_DelegatesToVisibilityService()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetStartRecommendedSectionVisible(false));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.SetStartRecommendedSectionVisible(false);
+
+            visibility.Verify(v => v.SetStartRecommendedSectionVisible(false), Times.Once);
+        }
+
+        [TestMethod]
+        public void SetStartRecommendedSectionVisible_NullOptions_ThrowsBeforeWrite()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            Assert.ThrowsException<ArgumentNullException>(() =>
+                _manager.SetStartRecommendedSectionVisible(true, null));
+        }
+
+        [TestMethod]
+        public void SetStartRecommendedSectionVisible_WithRefresh_RefreshesExplorer()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetStartRecommendedSectionVisible(true));
+            _explorerRefresher.Setup(r => r.Refresh(TimeSpan.FromSeconds(10)));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.SetStartRecommendedSectionVisible(
+                true,
+                new VisibilityOptions { RefreshExplorer = true });
+
+            visibility.Verify(v => v.SetStartRecommendedSectionVisible(true), Times.Once);
+            _explorerRefresher.Verify(r => r.Refresh(TimeSpan.FromSeconds(10)), Times.Once);
+        }
+
+        [TestMethod]
+        public void ShowStartRecommendedSection_SetsVisibleTrue()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetStartRecommendedSectionVisible(true));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.ShowStartRecommendedSection();
+
+            visibility.Verify(v => v.SetStartRecommendedSectionVisible(true), Times.Once);
+        }
+
+        [TestMethod]
+        public void HideStartRecommendedSection_SetsVisibleFalse()
+        {
+            var visibility = new Mock<IQuickAccessVisibility>(MockBehavior.Strict);
+            visibility.Setup(v => v.SetStartRecommendedSectionVisible(false));
+            _manager.Dispose();
+            _manager = CreateManager(visibility.Object);
+
+            _manager.HideStartRecommendedSection();
+
+            visibility.Verify(v => v.SetStartRecommendedSectionVisible(false), Times.Once);
+        }
+
+        [TestMethod]
         public void GetRecentFilesMetadata_ParsesRecentBackingFile()
         {
             var reader = new Mock<IDestListMetadataReader>(MockBehavior.Strict);
