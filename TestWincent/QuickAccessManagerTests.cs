@@ -1471,6 +1471,39 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void RetryPolicy_Validate_AcceptsBuiltInPolicies()
+        {
+            RetryPolicy.None.Validate();
+            RetryPolicy.Fast.Validate();
+            RetryPolicy.Standard.Validate();
+            RetryPolicy.Aggressive.Validate();
+        }
+
+        [TestMethod]
+        public void RetryPolicy_Validated_ReturnsSamePolicy()
+        {
+            var policy = new RetryPolicy(
+                1,
+                TimeSpan.FromMilliseconds(10),
+                TimeSpan.FromMilliseconds(100),
+                1.5,
+                false);
+
+            Assert.AreSame(policy, policy.Validated());
+        }
+
+        [TestMethod]
+        public void RetryPolicy_Ctor_RejectsNonFiniteBackoffFactor()
+        {
+            Assert.ThrowsException<ArgumentOutOfRangeException>(
+                () => new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), double.NaN, false));
+            Assert.ThrowsException<ArgumentOutOfRangeException>(
+                () => new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), double.PositiveInfinity, false));
+            Assert.ThrowsException<ArgumentOutOfRangeException>(
+                () => new RetryPolicy(1, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), double.NegativeInfinity, false));
+        }
+
+        [TestMethod]
         public void LockQuickAccess_UsesAllLockTarget()
         {
             var lockFactory = new Mock<IQuickAccessLockFactory>(MockBehavior.Strict);

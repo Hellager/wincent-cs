@@ -35,18 +35,7 @@ namespace Wincent
         /// </summary>
         public RetryPolicy(int maxRetryCount, TimeSpan initialDelay, TimeSpan maxDelay, double backoffFactor, bool useJitter)
         {
-            if (maxRetryCount < 0)
-                throw new ArgumentOutOfRangeException(nameof(maxRetryCount));
-            if (initialDelay < TimeSpan.Zero)
-                throw new ArgumentOutOfRangeException(nameof(initialDelay));
-            if (maxDelay < TimeSpan.Zero)
-                throw new ArgumentOutOfRangeException(nameof(maxDelay));
-            if (backoffFactor < 1.0)
-                throw new ArgumentOutOfRangeException(nameof(backoffFactor));
-            if (maxRetryCount > 0 && initialDelay == TimeSpan.Zero)
-                throw new ArgumentOutOfRangeException(nameof(initialDelay));
-            if (maxRetryCount > 0 && maxDelay < initialDelay)
-                throw new ArgumentOutOfRangeException(nameof(maxDelay));
+            ValidateParameters(maxRetryCount, initialDelay, maxDelay, backoffFactor);
 
             MaxRetryCount = maxRetryCount;
             InitialDelay = initialDelay;
@@ -81,6 +70,26 @@ namespace Wincent
         public bool UseJitter { get; }
 
         /// <summary>
+        /// Validates this retry policy.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">The policy contains an invalid numeric setting.</exception>
+        public void Validate()
+        {
+            ValidateParameters(MaxRetryCount, InitialDelay, MaxDelay, BackoffFactor);
+        }
+
+        /// <summary>
+        /// Returns this retry policy after validation.
+        /// </summary>
+        /// <returns>This retry policy.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">The policy contains an invalid numeric setting.</exception>
+        public RetryPolicy Validated()
+        {
+            Validate();
+            return this;
+        }
+
+        /// <summary>
         /// Gets the delay for a retry attempt.
         /// </summary>
         /// <param name="retryAttempt">The zero-based retry attempt.</param>
@@ -110,6 +119,26 @@ namespace Wincent
             }
 
             return TimeSpan.FromMilliseconds(milliseconds);
+        }
+
+        private static void ValidateParameters(
+            int maxRetryCount,
+            TimeSpan initialDelay,
+            TimeSpan maxDelay,
+            double backoffFactor)
+        {
+            if (maxRetryCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxRetryCount));
+            if (initialDelay < TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(initialDelay));
+            if (maxDelay < TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(maxDelay));
+            if (double.IsNaN(backoffFactor) || double.IsInfinity(backoffFactor) || backoffFactor < 1.0)
+                throw new ArgumentOutOfRangeException(nameof(backoffFactor), "Backoff factor must be finite and greater than or equal to 1.0.");
+            if (maxRetryCount > 0 && initialDelay == TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(initialDelay));
+            if (maxRetryCount > 0 && maxDelay < initialDelay)
+                throw new ArgumentOutOfRangeException(nameof(maxDelay));
         }
     }
 }
