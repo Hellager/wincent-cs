@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Wincent
 {
@@ -12,9 +13,14 @@ namespace Wincent
     {
         private const string QuickAccessGuid = "679f85cb-0220-4080-b29b-5540cc05aab6";
         private const string HomeGuid = "f874310e-b6b7-47dc-bc84-b9e6b38f5903";
+        private const string QuickAccessNamespace = "shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}";
+        private const string HomeNamespace = "shell:::{f874310e-b6b7-47dc-bc84-b9e6b38f5903}";
+        private const int BrowserReadyStateComplete = 4;
+        private const int BrowserReadyPollIntervalMilliseconds = 200;
 
         private readonly INativeMethods _nativeMethods;
         private readonly IShellApplicationFactory _shellApplicationFactory;
+        private readonly Func<string> _desktopPathProvider;
 
         public ShellExplorerRefresher(INativeMethods nativeMethods)
             : this(nativeMethods, new DefaultShellApplicationFactory())
@@ -24,9 +30,21 @@ namespace Wincent
         internal ShellExplorerRefresher(
             INativeMethods nativeMethods,
             IShellApplicationFactory shellApplicationFactory)
+            : this(
+                  nativeMethods,
+                  shellApplicationFactory,
+                  () => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory))
+        {
+        }
+
+        internal ShellExplorerRefresher(
+            INativeMethods nativeMethods,
+            IShellApplicationFactory shellApplicationFactory,
+            Func<string> desktopPathProvider)
         {
             _nativeMethods = nativeMethods ?? throw new ArgumentNullException(nameof(nativeMethods));
             _shellApplicationFactory = shellApplicationFactory ?? throw new ArgumentNullException(nameof(shellApplicationFactory));
+            _desktopPathProvider = desktopPathProvider ?? throw new ArgumentNullException(nameof(desktopPathProvider));
         }
 
         public void Refresh(TimeSpan timeout)
@@ -53,7 +71,10 @@ namespace Wincent
                 if (recentResult.Matched > 0)
                 {
                     if (recentResult.Refreshed > 0)
+                    {
+                        NavigateRecentAccessWindowToDesktopAndBack(windows, count);
                         return;
+                    }
 
                     throw new QuickAccessOperationException(
                         "RefreshExplorer",
@@ -125,6 +146,140 @@ namespace Wincent
             }
 
             return result;
+        }
+
+        private void NavigateRecentAccessWindowToDesktopAndBack(object windows, int count)
+        {
+            object window = null;
+            try
+            {
+                window = FindRecentAccessWindow(windows, count);
+                if (window == null)
+                    return;
+
+                dynamic webBrowser = window;
+                var original = ReadWindowLocation(webBrowser);
+                NavigateToUrl(webBrowser, FileUrlFromPath(_desktopPathProvider()));
+                NavigateBackToLocation(webBrowser, original);
+            }
+            catch (QuickAccessOperationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new QuickAccessOperationException("NavigateExplorerWindow", QuickAccess.All, null, ex);
+            }
+            finally
+            {
+                if (window != null && Marshal.IsComObject(window))
+                    Marshal.FinalReleaseComObject(window);
+            }
+        }
+
+        private static object FindRecentAccessWindow(object windows, int count)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                object window = null;
+                try
+                {
+                    window = ((dynamic)windows).Item(index);
+                    if (window == null)
+                        continue;
+
+                    dynamic webBrowser = window;
+                    if (IsRecentAccessLocation(ReadWindowLocation(webBrowser)))
+                        return window;
+                }
+                catch (COMException)
+                {
+                }
+                catch (Exception)
+                {
+                }
+
+                if (window != null && Marshal.IsComObject(window))
+                    Marshal.FinalReleaseComObject(window);
+            }
+
+            return null;
+        }
+
+        private static ExplorerLocation ReadWindowLocation(dynamic window)
+        {
+            return new ExplorerLocation(
+                ReadStringProperty(() => window.LocationName),
+                ReadStringProperty(() => window.LocationURL));
+        }
+
+        private static void NavigateBackToLocation(dynamic window, ExplorerLocation original)
+        {
+            if (!string.IsNullOrEmpty(original.LocationUrl))
+            {
+                NavigateToUrl(window, original.LocationUrl);
+                return;
+            }
+
+            foreach (var candidate in new[] { QuickAccessNamespace, HomeNamespace })
+            {
+                NavigateToUrl(window, candidate);
+                if (IsRecentAccessLocation(ReadWindowLocation(window)))
+                    return;
+            }
+
+            throw new InvalidOperationException("Failed to navigate Explorer back to Quick Access or Home.");
+        }
+
+        private static void NavigateToUrl(dynamic window, string url)
+        {
+            window.Navigate2(url, Type.Missing, Type.Missing, Type.Missing, Type.Missing);
+            WaitForBrowserReady(window, TimeSpan.FromSeconds(5));
+        }
+
+        private static void WaitForBrowserReady(dynamic window, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!ReadBrowserBusy(window) && ReadBrowserReadyState(window) == BrowserReadyStateComplete)
+                    return;
+
+                Thread.Sleep(BrowserReadyPollIntervalMilliseconds);
+            }
+        }
+
+        private static bool ReadBrowserBusy(dynamic window)
+        {
+            try
+            {
+                return Convert.ToBoolean(window.Busy);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private static int ReadBrowserReadyState(dynamic window)
+        {
+            try
+            {
+                return Convert.ToInt32(window.ReadyState);
+            }
+            catch (Exception)
+            {
+                return BrowserReadyStateComplete;
+            }
+        }
+
+        internal static string FileUrlFromPath(string path)
+        {
+            string value = (path ?? string.Empty).Replace('\\', '/');
+            if (value.Length >= 2 && value[1] == ':')
+                value = "/" + value;
+
+            return "file://" + value;
         }
 
         private static bool TryRefreshWindow(dynamic window)

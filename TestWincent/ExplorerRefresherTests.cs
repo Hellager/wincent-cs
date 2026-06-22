@@ -63,6 +63,14 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void FileUrlFromPath_FormatsDrivePath()
+        {
+            Assert.AreEqual(
+                "file:///C:/Users/Test/Desktop",
+                ShellExplorerRefresher.FileUrlFromPath(@"C:\Users\Test\Desktop"));
+        }
+
+        [TestMethod]
         public void Refresh_RefreshesQuickAccessWindowBeforeOtherExplorerWindows()
         {
             var quickAccess = new FakeWindow("Home", "shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}");
@@ -73,6 +81,24 @@ namespace TestWincent
 
             Assert.AreEqual(1, quickAccess.RefreshCalls);
             Assert.AreEqual(0, documents.RefreshCalls);
+        }
+
+        [TestMethod]
+        public void Refresh_QuickAccessWindow_NavigatesDesktopAndBackAfterRefresh()
+        {
+            var quickAccess = new FakeWindow("Home", "shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}");
+            var refresher = CreateRefresher(quickAccess);
+
+            refresher.Refresh(TimeSpan.FromSeconds(10));
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "file:///C:/Users/Test/Desktop",
+                    "shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}"
+                },
+                quickAccess.NavigatedUrls);
+            Assert.AreEqual("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}", quickAccess.LocationURL);
         }
 
         [TestMethod]
@@ -105,6 +131,7 @@ namespace TestWincent
 
             Assert.AreEqual(0, browser.RefreshCalls);
             Assert.AreEqual(1, documents.RefreshCalls);
+            Assert.AreEqual(0, documents.NavigatedUrls.Count);
         }
 
         [TestMethod]
@@ -128,7 +155,8 @@ namespace TestWincent
 
             return new ShellExplorerRefresher(
                 nativeMethods.Object,
-                new FakeShellApplicationFactory(windows));
+                new FakeShellApplicationFactory(windows),
+                () => @"C:\Users\Test\Desktop");
         }
 
         public sealed class FakeShellApplicationFactory : IShellApplicationFactory
@@ -194,19 +222,40 @@ namespace TestWincent
                 Document = new FakeDocument(documentRefreshThrows);
             }
 
-            public string LocationName { get; }
+            public string LocationName { get; private set; }
 
-            public string LocationURL { get; }
+            public string LocationURL { get; private set; }
 
             public FakeDocument Document { get; }
 
             public int RefreshCalls { get; private set; }
+
+            public List<string> NavigatedUrls { get; } = new List<string>();
+
+            public bool Busy { get; set; }
+
+            public int ReadyState { get; set; } = 4;
 
             public void Refresh()
             {
                 RefreshCalls++;
                 if (_refreshThrows)
                     throw new InvalidOperationException("refresh failed");
+            }
+
+            public void Navigate2(
+                object url,
+                object flags,
+                object targetFrameName,
+                object postData,
+                object headers)
+            {
+                string value = Convert.ToString(url);
+                NavigatedUrls.Add(value);
+                LocationURL = value;
+                LocationName = value.StartsWith("file:///", StringComparison.OrdinalIgnoreCase)
+                    ? "Desktop"
+                    : "Home";
             }
         }
 
