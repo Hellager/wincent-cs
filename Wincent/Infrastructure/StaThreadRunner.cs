@@ -4,11 +4,23 @@ using System.Threading;
 
 namespace Wincent
 {
+    /// <summary>
+    /// Runs Shell COM work on a dedicated single-threaded apartment worker.
+    /// </summary>
+    /// <remarks>
+    /// Windows Shell verbs and namespace operations can hang or fail when invoked from an arbitrary caller thread,
+    /// especially on Windows 11 where Explorer often performs cross-process COM calls for Quick Access actions such as
+    /// <c>pintohome</c>. A fresh STA worker gives COM a predictable apartment for those calls.
+    /// </remarks>
     internal static class StaThreadRunner
     {
+        // Normal Quick Access usage has at most one or two concurrent Shell operations. This limit is a guardrail
+        // against repeated timeouts accumulating background STA workers; it is not intended as throughput tuning.
         internal const int MaxActiveStaWorkers = 4;
         private static int _activeStaWorkers;
 
+        // Exposed internally for tests and diagnostics. The count tracks workers that are still alive, not callers
+        // still waiting for them.
         internal static int ActiveWorkerCount => Volatile.Read(ref _activeStaWorkers);
 
         public static void Run(
@@ -56,6 +68,8 @@ namespace Wincent
             {
                 try
                 {
+                    // COM is initialized and uninitialized on the worker itself. If the caller times out below, this
+                    // block may still complete later and mutate Explorer state.
                     using (ComGuard.InitializeSta(nativeMethods, disableOle1Dde))
                     {
                         result = action();
@@ -67,6 +81,8 @@ namespace Wincent
                 }
                 finally
                 {
+                    // Release the worker slot only when the STA thread exits naturally. A caller-side timeout does not
+                    // cancel Shell COM, so releasing here prevents a burst of timeouts from spawning unlimited workers.
                     Interlocked.Decrement(ref _activeStaWorkers);
                 }
             });
