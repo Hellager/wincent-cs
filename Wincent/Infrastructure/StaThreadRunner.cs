@@ -6,6 +6,11 @@ namespace Wincent
 {
     internal static class StaThreadRunner
     {
+        internal const int MaxActiveStaWorkers = 4;
+        private static int _activeStaWorkers;
+
+        internal static int ActiveWorkerCount => Volatile.Read(ref _activeStaWorkers);
+
         public static void Run(
             Action action,
             TimeSpan timeout,
@@ -41,6 +46,12 @@ namespace Wincent
             ExceptionDispatchInfo exception = null;
             T result = default(T);
 
+            if (!TryAcquireActiveWorker())
+            {
+                throw new TimeoutException(
+                    "Too many Shell COM operations are still running; previous timed-out operations may not have finished yet.");
+            }
+
             var thread = new Thread(() =>
             {
                 try
@@ -54,11 +65,23 @@ namespace Wincent
                 {
                     exception = ExceptionDispatchInfo.Capture(ex);
                 }
+                finally
+                {
+                    Interlocked.Decrement(ref _activeStaWorkers);
+                }
             });
 
             thread.IsBackground = true;
             thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
+            try
+            {
+                thread.Start();
+            }
+            catch
+            {
+                Interlocked.Decrement(ref _activeStaWorkers);
+                throw;
+            }
 
             if (!thread.Join(timeout))
                 throw new TimeoutException($"COM STA thread timed out after {timeout.TotalSeconds:0.###} seconds.");
@@ -67,6 +90,19 @@ namespace Wincent
                 exception.Throw();
 
             return result;
+        }
+
+        private static bool TryAcquireActiveWorker()
+        {
+            while (true)
+            {
+                int current = Volatile.Read(ref _activeStaWorkers);
+                if (current >= MaxActiveStaWorkers)
+                    return false;
+
+                if (Interlocked.CompareExchange(ref _activeStaWorkers, current + 1, current) == current)
+                    return true;
+            }
         }
     }
 }
