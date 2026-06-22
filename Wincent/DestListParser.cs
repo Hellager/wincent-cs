@@ -217,6 +217,7 @@ namespace Wincent
 
             return BuildEntry(
                 cfb,
+                destList,
                 offset,
                 pathEnd - offset,
                 mruPosition,
@@ -278,6 +279,7 @@ namespace Wincent
 
             return BuildEntry(
                 cfb,
+                destList,
                 offset,
                 entryEnd - offset,
                 mruPosition,
@@ -297,6 +299,7 @@ namespace Wincent
 
         private static DestListEntry BuildEntry(
             CompoundFile cfb,
+            byte[] destList,
             int entryOffset,
             int entryLength,
             int mruPosition,
@@ -327,6 +330,12 @@ namespace Wincent
                 EntryNumber = entryNumber,
                 EntryNumberUnknown = entryNumberReserved,
                 EntryNumberReserved = entryNumberReserved,
+                Hostname = DecodeHostname(destList, entryOffset + 0x48),
+                VolumeDroid = FormatGuidFromLittleEndianBytes(destList, entryOffset + 0x08),
+                FileDroid = FormatGuidFromLittleEndianBytes(destList, entryOffset + 0x18),
+                VolumeBirthDroid = FormatGuidFromLittleEndianBytes(destList, entryOffset + 0x28),
+                FileBirthDroid = FormatGuidFromLittleEndianBytes(destList, entryOffset + 0x38),
+                FileDroidMac = MacFromDroidBytes(destList, entryOffset + 0x18),
                 StreamName = streamName,
                 RawPath = rawPath,
                 Path = resolved.BestPath,
@@ -538,6 +547,47 @@ namespace Wincent
                 return null;
 
             return Encoding.ASCII.GetString(data, offset, end - offset);
+        }
+
+        private static string DecodeHostname(byte[] data, int offset)
+        {
+            if (data == null || offset < 0 || offset + 16 > data.Length)
+                return string.Empty;
+
+            string ascii = DecodeAsciiNulPadded(data, offset, 16);
+            if (!string.IsNullOrEmpty(ascii))
+                return ascii;
+
+            return DecodeUtf16Lossy(data, offset, 16).TrimEnd('\0');
+        }
+
+        private static string DecodeAsciiNulPadded(byte[] data, int offset, int length)
+        {
+            int end = offset;
+            int limit = Math.Min(data.Length, offset + length);
+            while (end < limit && data[end] != 0)
+                end++;
+
+            return Encoding.UTF8.GetString(data, offset, end - offset).Trim();
+        }
+
+        private static string FormatGuidFromLittleEndianBytes(byte[] data, int offset)
+        {
+            if (data == null || offset < 0 || offset + 16 > data.Length)
+                return string.Empty;
+
+            return new Guid(SliceBytes(data, offset, 16)).ToString("D");
+        }
+
+        private static string MacFromDroidBytes(byte[] data, int offset)
+        {
+            if (data == null || offset < 0 || offset + 16 > data.Length)
+                return string.Empty;
+
+            return string.Join(
+                ":",
+                Enumerable.Range(offset + 10, 6)
+                    .Select(index => data[index].ToString("x2", CultureInfo.InvariantCulture)));
         }
 
         private static string ReadUtf16ZString(byte[] data, int offset, int limit)

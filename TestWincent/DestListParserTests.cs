@@ -9,6 +9,30 @@ namespace TestWincent
     [TestClass]
     public class DestListParserTests
     {
+        private static readonly byte[] VolumeDroidBytes =
+        {
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+            0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+        };
+
+        private static readonly byte[] FileDroidBytes =
+        {
+            0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
+            0x00, 0x11, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01
+        };
+
+        private static readonly byte[] VolumeBirthDroidBytes =
+        {
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+            0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80
+        };
+
+        private static readonly byte[] FileBirthDroidBytes =
+        {
+            0x89, 0x67, 0x45, 0x23, 0x01, 0xef, 0xcd, 0xab,
+            0x98, 0x76, 0x54, 0x32, 0x10, 0x00, 0xff, 0xee
+        };
+
         public TestContext TestContext { get; set; }
 
         [TestMethod]
@@ -57,6 +81,12 @@ namespace TestWincent
             Assert.AreEqual(42u, entry.EntryNumber);
             Assert.AreEqual(99u, entry.EntryNumberReserved);
             Assert.AreEqual(0x000000630000002aUL, entry.EntryId);
+            Assert.AreEqual("HOST", entry.Hostname);
+            Assert.AreEqual("33221100-5544-7766-8899-aabbccddeeff", entry.VolumeDroid);
+            Assert.AreEqual("76543210-ba98-fedc-0011-aabbccddee01", entry.FileDroid);
+            Assert.AreEqual("67452301-ab89-efcd-1020-304050607080", entry.VolumeBirthDroid);
+            Assert.AreEqual("23456789-ef01-abcd-9876-54321000ffee", entry.FileBirthDroid);
+            Assert.AreEqual("aa:bb:cc:dd:ee:01", entry.FileDroidMac);
             Assert.AreEqual("2a", entry.StreamName);
             Assert.AreEqual(@"C:\Test\file.txt", entry.RawPath);
             Assert.AreEqual(@"C:\Test\file.txt", entry.Path);
@@ -403,6 +433,11 @@ namespace TestWincent
             foreach (var entry in entries)
             {
                 byte[] pathBytes = Encoding.Unicode.GetBytes(entry.Path);
+                WriteBytes(data, offset + 0x08, VolumeDroidBytes);
+                WriteBytes(data, offset + 0x18, FileDroidBytes);
+                WriteBytes(data, offset + 0x28, VolumeBirthDroidBytes);
+                WriteBytes(data, offset + 0x38, FileBirthDroidBytes);
+                WriteAsciiPadded(data, offset + 0x48, "HOST", 16);
                 WriteUInt32(data, offset + 0x58, entry.EntryNumber);
                 WriteUInt32(data, offset + 0x5c, entry.EntryNumberUnknown);
                 WriteUInt32(data, offset + 0x60, BitConverter.ToUInt32(BitConverter.GetBytes(1.5f), 0));
@@ -419,6 +454,17 @@ namespace TestWincent
             }
 
             return data;
+        }
+
+        private static void WriteBytes(byte[] data, int offset, byte[] value)
+        {
+            Array.Copy(value, 0, data, offset, value.Length);
+        }
+
+        private static void WriteAsciiPadded(byte[] data, int offset, string value, int length)
+        {
+            byte[] valueBytes = Encoding.ASCII.GetBytes(value);
+            Array.Copy(valueBytes, 0, data, offset, Math.Min(valueBytes.Length, length));
         }
 
         private sealed class DestListEntrySpec
