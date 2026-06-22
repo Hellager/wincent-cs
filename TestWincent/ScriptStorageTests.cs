@@ -1,5 +1,6 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -158,8 +159,8 @@ namespace TestWincent
                 "Script file should use UTF8-BOM encoding");
 
             var fileName = Path.GetFileName(path);
-            Assert.IsTrue(Regex.IsMatch(fileName, @"^RemoveRecentFile_v\d+\.\d+\.\d+_[0-9A-F]{8}\.ps1$"),
-                "Filename format should be {ScriptName}_{Version}_{ParamHash}.ps1");
+            Assert.IsTrue(Regex.IsMatch(fileName, @"^RemoveRecentFile_v\d+\.\d+\.\d+_\d+_[0-9A-F]{8}\.ps1$"),
+                "Filename format should be {ScriptName}_{Version}_{Pid}_{ParamHash}.ps1");
         }
 
         [TestMethod]
@@ -264,6 +265,69 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void CleanupDynamicScripts_PreservesExpiredCurrentProcessDynamicScript()
+        {
+            string currentPid = Process.GetCurrentProcess().Id.ToString();
+            string file = Path.Combine(
+                ScriptStorage.DynamicScriptDir,
+                $"PinToFrequentFolder_{_testScriptVersion}_{currentPid}_ABCD1234.ps1");
+
+            try
+            {
+                File.WriteAllText(file, "current process dynamic script");
+                File.SetLastWriteTime(file, DateTime.Now.AddHours(-25));
+
+                ScriptStorage.CleanupDynamicScripts(5);
+
+                Assert.IsTrue(File.Exists(file), "Current process dynamic script should be preserved even when expired");
+            }
+            finally
+            {
+                if (File.Exists(file))
+                    File.Delete(file);
+            }
+        }
+
+        [TestMethod]
+        public void CleanupDynamicScripts_PreservesCurrentProcessDynamicScriptWithOldVersion()
+        {
+            string currentPid = Process.GetCurrentProcess().Id.ToString();
+            string file = Path.Combine(
+                ScriptStorage.DynamicScriptDir,
+                $"PinToFrequentFolder_v0.0.1_{currentPid}_ABCD1234.ps1");
+
+            try
+            {
+                File.WriteAllText(file, "current process old version dynamic script");
+
+                ScriptStorage.CleanupDynamicScripts(24);
+
+                Assert.IsTrue(File.Exists(file), "Current process dynamic script should be preserved during version cleanup");
+            }
+            finally
+            {
+                if (File.Exists(file))
+                    File.Delete(file);
+            }
+        }
+
+        [TestMethod]
+        public void CleanupDynamicScripts_RemovesExpiredOtherProcessDynamicScript()
+        {
+            string otherPid = (Process.GetCurrentProcess().Id + 1).ToString();
+            string file = Path.Combine(
+                ScriptStorage.DynamicScriptDir,
+                $"PinToFrequentFolder_{_testScriptVersion}_{otherPid}_ABCD1234.ps1");
+
+            File.WriteAllText(file, "other process dynamic script");
+            File.SetLastWriteTime(file, DateTime.Now.AddHours(-25));
+
+            ScriptStorage.CleanupDynamicScripts(5);
+
+            Assert.IsFalse(File.Exists(file), "Expired dynamic script from another process should be deleted");
+        }
+
+        [TestMethod]
         public void CleanupByVersion_RemovesOldVersionScripts()
         {
             var oldVersion = "v0.0.1";
@@ -301,8 +365,8 @@ namespace TestWincent
             string fileName1 = Path.GetFileName(path1);
             string fileName2 = Path.GetFileName(path2);
 
-            var match1 = Regex.Match(fileName1, @"^[A-Za-z]+_v\d+\.\d+\.\d+_([0-9A-F]{8})\.ps1$");
-            var match2 = Regex.Match(fileName2, @"^[A-Za-z]+_v\d+\.\d+\.\d+_([0-9A-F]{8})\.ps1$");
+            var match1 = Regex.Match(fileName1, @"^[A-Za-z]+_v\d+\.\d+\.\d+_\d+_([0-9A-F]{8})\.ps1$");
+            var match2 = Regex.Match(fileName2, @"^[A-Za-z]+_v\d+\.\d+\.\d+_\d+_([0-9A-F]{8})\.ps1$");
 
             Assert.IsTrue(match1.Success, "Filename 1 should match expected format");
             Assert.IsTrue(match2.Success, "Filename 2 should match expected format");

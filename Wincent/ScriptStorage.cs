@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -37,6 +38,8 @@ namespace Wincent
         private static readonly object InitializationLock = new object();
         private static readonly ConcurrentDictionary<string, object> ScriptCreationLocks =
             new ConcurrentDictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Regex DynamicScriptFileNamePattern =
+            new Regex(@"^([A-Za-z]+)_v(\d+\.\d+\.\d+)(?:_(\d+))?_([0-9A-F]{8})\.ps1$", RegexOptions.Compiled);
 
         private static int _initialized;
 
@@ -143,7 +146,7 @@ namespace Wincent
                 throw new ArgumentException("Parameter cannot be null or empty for parameterized scripts");
 
             string paramHash = GetParameterHash(parameter);
-            string fileName = $"{script}_{CurrentVersion}_{paramHash}.ps1";
+            string fileName = $"{script}_{CurrentVersion}_{CurrentProcessToken()}_{paramHash}.ps1";
             string scriptPath = Path.Combine(DynamicScriptDir, fileName);
 
             EnsureScriptFile(scriptPath, script, parameter);
@@ -261,6 +264,9 @@ namespace Wincent
 
                 foreach (var file in directory.GetFiles("*.ps1"))
                 {
+                    if (IsCurrentProcessDynamicScript(file.Name))
+                        continue;
+
                     if (file.LastWriteTime < cutoffTime)
                     {
                         try
@@ -288,10 +294,12 @@ namespace Wincent
             try
             {
                 var directory = new DirectoryInfo(DynamicScriptDir);
-                var versionPattern = new Regex(@"^([A-Za-z]+)_v(\d+\.\d+\.\d+)_([0-9A-F]{8})\.ps1$");
                 foreach (var file in directory.GetFiles("*.ps1"))
                 {
-                    var match = versionPattern.Match(file.Name);
+                    if (IsCurrentProcessDynamicScript(file.Name))
+                        continue;
+
+                    var match = DynamicScriptFileNamePattern.Match(file.Name);
                     if (!match.Success)
                         continue;
 
@@ -313,6 +321,21 @@ namespace Wincent
             {
                 // Ignore cleanup errors
             }
+        }
+
+        private static string CurrentProcessToken()
+        {
+            return Process.GetCurrentProcess().Id.ToString();
+        }
+
+        private static bool IsCurrentProcessDynamicScript(string fileName)
+        {
+            var match = DynamicScriptFileNamePattern.Match(fileName ?? string.Empty);
+            if (!match.Success)
+                return false;
+
+            string pid = match.Groups[3].Value;
+            return pid.Length > 0 && string.Equals(pid, CurrentProcessToken(), StringComparison.Ordinal);
         }
 
         /// <summary>
