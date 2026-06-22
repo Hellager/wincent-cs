@@ -11,6 +11,12 @@ namespace TestWincent
     public class StaThreadRunnerTests
     {
         [TestMethod]
+        public void MaxActiveStaWorkers_MatchesUpstreamWorkerCap()
+        {
+            Assert.AreEqual(4, StaThreadRunner.MaxActiveStaWorkers);
+        }
+
+        [TestMethod]
         public void Run_ReturnsResultFromStaThread()
         {
             var nativeMethods = CreateNativeMethods();

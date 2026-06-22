@@ -210,6 +210,7 @@ namespace TestWincent
         }
 
         [TestMethod]
+        [TestCategory("Integration")]
         [Ignore("Integration test; reads the current user's real Recent Files automaticDestinations file.")]
         public void Integration_ParseRecentFilesMetadata()
         {
@@ -221,6 +222,7 @@ namespace TestWincent
         }
 
         [TestMethod]
+        [TestCategory("Integration")]
         [Ignore("Integration test; reads the current user's real Frequent Folders automaticDestinations file.")]
         public void Integration_ParseFrequentFoldersMetadata()
         {

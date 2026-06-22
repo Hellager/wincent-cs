@@ -94,6 +94,41 @@ namespace TestWincent
         }
 
         [TestMethod]
+        public void CreateTestingDefaults_UsesIsolatedFallbackAndNoOpBackends()
+        {
+            var dependencies = QuickAccessManagerDependencies.CreateTestingDefaults(
+                _executor.Object,
+                TimeSpan.FromSeconds(10),
+                _fileSystem.Object,
+                _nativeMethods.Object,
+                _dataFiles.Object);
+
+            Assert.IsInstanceOfType(dependencies.NativeQuery, typeof(PowerShellFallbackNativeQuery));
+            Assert.IsInstanceOfType(dependencies.NativeMutation, typeof(PowerShellFallbackNativeMutation));
+            Assert.IsInstanceOfType(dependencies.ExplorerRefresher, typeof(PowerShellFallbackExplorerRefresher));
+            Assert.IsInstanceOfType(dependencies.RecentLinksCleaner, typeof(NoOpRecentLinksCleaner));
+            Assert.IsInstanceOfType(dependencies.LockFactory, typeof(NoOpQuickAccessLockFactory));
+            Assert.IsInstanceOfType(dependencies.Visibility, typeof(NoOpQuickAccessVisibility));
+            Assert.IsInstanceOfType(dependencies.DestListReader, typeof(NoOpDestListMetadataReader));
+            Assert.IsInstanceOfType(dependencies.RestoreEngine, typeof(NoOpQuickAccessRestoreEngine));
+
+            _manager.Dispose();
+            _manager = new QuickAccessManager(dependencies);
+
+            Assert.IsTrue(_manager.IsVisible(QuickAccess.RecentFiles));
+            Assert.IsTrue(_manager.IsStartRecommendedSectionVisible());
+            _manager.SetVisible(QuickAccess.FrequentFolders, false);
+            _manager.SetStartRecommendedSectionVisible(false);
+            using (var quickAccessLock = _manager.LockQuickAccess())
+            {
+                Assert.AreEqual(QuickAccessLockTarget.All, quickAccessLock.Target);
+            }
+
+            Assert.ThrowsException<InvalidOperationException>(() => _manager.GetRecentFilesMetadata());
+            Assert.ThrowsException<InvalidOperationException>(() => _manager.RestoreDefaults(QuickAccess.RecentFiles));
+        }
+
+        [TestMethod]
         public void GetItems_All_UsesMergedRecentAndFrequentFallback()
         {
             var expected = new List<string> { @"C:\a.txt", @"C:\shared", @"C:\folder" };
