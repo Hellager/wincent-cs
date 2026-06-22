@@ -823,7 +823,8 @@ namespace Wincent
         /// maps to Explorer's <c>ShowRecent</c> value, and <see cref="QuickAccess.FrequentFolders"/> maps to
         /// <c>ShowFrequent</c>. Missing registry values are treated as visible. Explorer's frequent-folder visibility
         /// setting only controls automatically shown, unpinned frequent folders; pinned Quick Access folders remain
-        /// controlled by Explorer's pin state.
+        /// controlled by Explorer's pin state. These methods read the registry state only; policy values, Explorer
+        /// version, and delayed Explorer refresh can affect what the UI currently shows.
         /// </remarks>
         /// <seealso cref="SetVisible(QuickAccess, bool)"/>
         public bool IsVisible(QuickAccess target)
@@ -842,7 +843,10 @@ namespace Wincent
         /// windows. Use <see cref="SetVisible(QuickAccess, bool, VisibilityOptions)"/> with
         /// <see cref="VisibilityOptions.RefreshExplorer"/> to request a Shell refresh. For
         /// <see cref="QuickAccess.FrequentFolders"/>, this setting only affects automatically shown, unpinned frequent
-        /// folders; pinned Quick Access folders are not hidden by <c>ShowFrequent</c>.
+        /// folders; pinned Quick Access folders are not hidden by <c>ShowFrequent</c>. This API writes the registry
+        /// directly and does not invoke Explorer's Folder Options UI. On current Windows builds, changing the same
+        /// settings through the UI can clear recent file entries or unpinned frequent folders; this method does not
+        /// deliberately perform those clears.
         /// </remarks>
         /// <seealso cref="IsVisible(QuickAccess)"/>
         public void SetVisible(QuickAccess target, bool visible)
@@ -862,7 +866,8 @@ namespace Wincent
         /// This method writes the current Windows user's Explorer registry settings. When
         /// <see cref="VisibilityOptions.RefreshExplorer"/> is enabled, Explorer windows are refreshed after the registry
         /// write. If the refresh fails after both native Shell refresh and PowerShell fallback, the refresh failure is
-        /// propagated and the registry write is not rolled back.
+        /// propagated and the registry write is not rolled back. This API writes only the current-user registry values;
+        /// Explorer can delay applying them until a refresh, restart, or later shell state update.
         /// </remarks>
         /// <seealso cref="IsVisible(QuickAccess)"/>
         public void SetVisible(QuickAccess target, bool visible, VisibilityOptions options)
@@ -882,7 +887,9 @@ namespace Wincent
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="target"/> is not supported.</exception>
         /// <remarks>
         /// This method writes the current Windows user's Explorer registry settings and does not refresh Explorer
-        /// windows. Use <see cref="ShowSection(QuickAccess, VisibilityOptions)"/> to request a Shell refresh.
+        /// windows. Use <see cref="ShowSection(QuickAccess, VisibilityOptions)"/> to request a Shell refresh. Showing
+        /// Frequent Folders again can make Explorer display Windows default system pins if Explorer has previously
+        /// rebuilt that section.
         /// </remarks>
         /// <seealso cref="SetVisible(QuickAccess, bool)"/>
         public void ShowSection(QuickAccess target)
@@ -915,7 +922,8 @@ namespace Wincent
         /// This method writes the current Windows user's Explorer registry settings and does not refresh Explorer
         /// windows. Use <see cref="HideSection(QuickAccess, VisibilityOptions)"/> to request a Shell refresh. For
         /// <see cref="QuickAccess.FrequentFolders"/>, pinned Quick Access folders remain visible because Explorer
-        /// treats pinned folders separately from automatically shown frequent folders.
+        /// treats pinned folders separately from automatically shown frequent folders. Hiding through this API does not
+        /// deliberately clear the underlying recent/frequent history.
         /// </remarks>
         /// <seealso cref="SetVisible(QuickAccess, bool)"/>
         public void HideSection(QuickAccess target)
@@ -961,7 +969,9 @@ namespace Wincent
         /// <param name="visible">Whether recently used files should appear in Windows Recommended items.</param>
         /// <remarks>
         /// Passing <see langword="true"/> writes <c>Start_TrackDocs = 1</c>; passing <see langword="false"/> writes
-        /// <c>Start_TrackDocs = 0</c>. This method does not refresh Explorer windows.
+        /// <c>Start_TrackDocs = 0</c>. The value is not removed, so repeated calls are deterministic. This method does
+        /// not refresh Explorer windows, and Start may require a refresh, restart, sign-out, or supported Windows
+        /// edition/build before the UI reflects the change.
         /// </remarks>
         /// <seealso cref="SetStartRecommendedSectionVisible(bool, VisibilityOptions)"/>
         public void SetStartRecommendedSectionVisible(bool visible)
@@ -978,7 +988,8 @@ namespace Wincent
         /// <remarks>
         /// When <see cref="VisibilityOptions.RefreshExplorer"/> is enabled, Explorer windows are refreshed after the
         /// registry write. If refresh fails after both native Shell refresh and PowerShell fallback, the refresh failure
-        /// is propagated and the registry write is not rolled back.
+        /// is propagated and the registry write is not rolled back. MDM settings, policy values, Windows edition, and
+        /// Explorer version can override or delay the effective Start Recommended UI state.
         /// </remarks>
         /// <seealso cref="IsStartRecommendedSectionVisible"/>
         public void SetStartRecommendedSectionVisible(bool visible, VisibilityOptions options)

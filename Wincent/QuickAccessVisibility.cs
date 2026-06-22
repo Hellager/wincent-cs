@@ -30,10 +30,21 @@ namespace Wincent
         void SetAdvancedDwordValue(string name, int value);
     }
 
+    /// <summary>
+    /// Registry-backed visibility controls for Explorer Quick Access and Start Recommended items.
+    /// </summary>
+    /// <remarks>
+    /// This implementation writes only the current user's registry values. It does not open Explorer's Folder Options UI
+    /// and does not deliberately clear Quick Access history. Observed Windows behavior differs between direct registry
+    /// writes and UI changes: hiding Frequent Folders here hides unpinned frequent folders while pinned folders remain
+    /// visible, but changing the same option in the Explorer UI can clear unpinned frequent folders and later restore
+    /// default system pins. Explorer UI changes to Recent Files visibility can also clear recent file entries.
+    /// </remarks>
     internal sealed class RegistryQuickAccessVisibility : IQuickAccessVisibility
     {
         // Explorer stores the Quick Access visibility toggles under the current user's Explorer key.
-        // ShowFrequent controls automatically shown, unpinned frequent folders; pinned folders are separate.
+        // ShowFrequent controls automatically shown, unpinned frequent folders; pinned folders are separate. Start
+        // Recommended recent-file visibility is controlled by Start_TrackDocs under Explorer\Advanced.
         private const string ShowRecentValueName = "ShowRecent";
         private const string ShowFrequentValueName = "ShowFrequent";
         private const string StartTrackDocsValueName = "Start_TrackDocs";
